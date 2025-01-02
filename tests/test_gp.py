@@ -7,17 +7,7 @@ import pytest
 from pymc_experimental.gp.pytensor_gp import GP, ExpQuad, conditional_gp
 
 
-def test_exp_quad():
-    x = pt.arange(3)[:, None]
-    ls = pt.ones(())
-    cov = ExpQuad(x, ls=ls).eval()
-    expected_distance = np.array([[0.0, 1.0, 4.0], [1.0, 0.0, 1.0], [4.0, 1.0, 0.0]])
-
-    np.testing.assert_allclose(cov, np.exp(-0.5 * expected_distance))
-
-
-# @pytest.fixture(scope="session")
-def latent_model():
+def build_latent_model():
     with pm.Model() as m:
         X = pm.Data("X", np.arange(3)[:, None])
         y = np.full(3, np.pi)
@@ -31,7 +21,7 @@ def latent_model():
     return m
 
 
-def latent_model_old_API():
+def build_latent_model_old_API():
     with pm.Model() as m:
         X = pm.Data("X", np.arange(3)[:, None])
         y = np.full(3, np.pi)
@@ -46,9 +36,18 @@ def latent_model_old_API():
     return m, gp_class
 
 
+def test_exp_quad():
+    x = pt.arange(3)[:, None]
+    ls = pt.ones(())
+    cov = ExpQuad(x, ls=ls).eval()
+    expected_distance = np.array([[0.0, 1.0, 4.0], [1.0, 0.0, 1.0], [4.0, 1.0, 0.0]])
+
+    np.testing.assert_allclose(cov, np.exp(-0.5 * expected_distance))
+
+
 def test_latent_model_prior():
-    m = latent_model()
-    ref_m, _ = latent_model_old_API()
+    m = build_latent_model()
+    ref_m, _ = build_latent_model_old_API()
 
     prior = pm.draw(m["gp"], draws=1000)
     prior_ref = pm.draw(ref_m["gp"], draws=1000)
@@ -67,10 +66,10 @@ def test_latent_model_prior():
 
 
 def test_latent_model_logp():
-    m = latent_model()
+    m = build_latent_model()
     ip = m.initial_point()
 
-    ref_m, _ = latent_model_old_API()
+    ref_m, _ = build_latent_model_old_API()
 
     np.testing.assert_allclose(
         m.compile_logp()(ip),
@@ -89,7 +88,7 @@ def test_latent_model_conditional(inline):
 
     new_x = np.array([3, 4])[:, None]
 
-    m = latent_model()
+    m = build_latent_model()
     with m:
         pm.Deterministic("gp_exp", m["gp"].exp())
 
@@ -100,7 +99,7 @@ def test_latent_model_conditional(inline):
             progressbar=False,
         ).posterior_predictive
 
-    ref_m, ref_gp_class = latent_model_old_API()
+    ref_m, ref_gp_class = build_latent_model_old_API()
     with ref_m:
         gp_star = ref_gp_class.conditional("gp_star", Xnew=new_x)
         pred_ref = pm.sample_posterior_predictive(
