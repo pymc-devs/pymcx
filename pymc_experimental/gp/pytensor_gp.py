@@ -110,11 +110,15 @@ def conditional_gp(
 
     def _build_conditional(Xnew, f, cov, jitter):
         if not isinstance(cov.owner.op, GPCovariance):
+            # TODO: Look for xx kernels in the ancestors of f
             raise NotImplementedError(f"Cannot build conditional of {cov.owner.op} operation")
+
         X, ls = cov.owner.inputs
 
         Kxx = cov
+        # Kxs = toposort_replace(cov, tuple(zip(xx_kernels, xs_kernels)))
         Kxs = cov.owner.op.build_covariance(X, Xnew, ls=ls)
+        # Kss = toposort_replace(cov, tuple(zip(xx_kernels, ss_kernels)))
         Kss = cov.owner.op.build_covariance(Xnew, ls=ls)
 
         L = pt.linalg.cholesky(Kxx + pt.eye(X.shape[0]) * jitter)
@@ -141,7 +145,6 @@ def conditional_gp(
     else:
         raise NotImplementedError("Can only condition on pure GPs")
 
-    # TODO: We should write the naive conditional covariance, and then have rewrites that lift it through kernels
     mu_star, cov_star = _build_conditional(Xnew, gp_model_var, cov, jitter)
     gp_rv_star = pm.MvNormal.dist(mu_star, cov_star, name=f"{gp.name}_star")
 
