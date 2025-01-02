@@ -116,9 +116,9 @@ def conditional_gp(
         X, ls = cov.owner.inputs
 
         Kxx = cov
-        # Kxs = toposort_replace(cov, tuple(zip(xx_kernels, xs_kernels)))
+        # Kxs = toposort_replace(cov, tuple(zip(xx_kernels, xs_kernels)), rebuild=True)
         Kxs = cov.owner.op.build_covariance(X, Xnew, ls=ls)
-        # Kss = toposort_replace(cov, tuple(zip(xx_kernels, ss_kernels)))
+        # Kss = toposort_replace(cov, tuple(zip(xx_kernels, ss_kernels)), rebuild=True)
         Kss = cov.owner.op.build_covariance(Xnew, ls=ls)
 
         L = pt.linalg.cholesky(Kxx + pt.eye(X.shape[0]) * jitter)
