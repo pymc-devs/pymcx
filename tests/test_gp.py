@@ -1,8 +1,10 @@
+import arviz as az
 import numpy as np
 import pymc as pm
 import pytensor.tensor as pt
+import pytest
 
-from pymc_experimental.gp.pytensor_gp import GP, ExpQuad
+from pymc_experimental.gp.pytensor_gp import GP, ExpQuad, conditional_gp
 
 
 def test_exp_quad():
@@ -77,71 +79,58 @@ def test_latent_model_logp():
     )
 
 
-import arviz as az
-
-
-def gp_conditional(model, gp, Xnew, jitter=1e-6):
-    def _build_conditional(self, Xnew, f, cov, jitter):
-        X, ls = cov.owner.inputs
-
-        Kxx = cov
-        Kxs = cov.owner.op.build_covariance(X, Xnew, ls=ls)
-        Kss = cov.owner.op.build_covariance(Xnew, ls=ls)
-
-        L = pt.linalg.cholesky(Kxx + pt.eye(X.shape[0]) * jitter)
-        # TODO: Use cho_solve
-        A = pt.linalg.solve_triangular(L, Kxs, lower=True)
-        v = pt.linalg.solve_triangular(L, f, lower=True)
-
-        mu = (A.mT @ v).T  # Vector?
-        cov = Kss - (A.mT @ A)
-
-        return mu, cov
-
-    with model.copy() as new_m:
-        gp = new_m[gp.name]
-        _, cov = gp.owner.op.dist_params(gp.owner)
-        mu_star, cov_star = _build_conditional(None, Xnew, gp, cov, jitter)
-        gp_star = pm.MvNormal("gp_star", mu_star, cov_star)
-        return new_m
-
-
-def test_latent_model_predict_new_x():
+@pytest.mark.parametrize("inline", (False, True))
+def test_latent_model_conditional(inline):
     rng = np.random.default_rng(0)
+    posterior = az.from_dict(
+        posterior={"gp": rng.normal(np.pi, 1e-3, size=(4, 1000, 3))},
+        constant_data={"X": np.arange(3)[:, None]},
+    )
+
     new_x = np.array([3, 4])[:, None]
 
     m = latent_model()
+    with m:
+        pm.Deterministic("gp_exp", m["gp"].exp())
+
+    with conditional_gp(m, m["gp"], new_x, inline=inline) as cgp:
+        pred = pm.sample_posterior_predictive(
+            posterior,
+            var_names=["gp_star", "gp_exp"],
+            progressbar=False,
+        ).posterior_predictive
+
     ref_m, ref_gp_class = latent_model_old_API()
-
-    posterior_idata = az.from_dict({"gp": rng.normal(np.pi, 1e-3, size=(4, 1000, 2))})
-
-    # with gp_extend_to_new_x(m):
-    with gp_conditional(m, m["gp"], new_x):
-        pred = (
-            pm.sample_posterior_predictive(posterior_idata, var_names=["gp_star"])
-            .posterior_predictiev["gp"]
-            .values
-        )
-
     with ref_m:
         gp_star = ref_gp_class.conditional("gp_star", Xnew=new_x)
-        pred_ref = (
-            pm.sample_posterior_predictive(posterior_idata, var_names=["gp_star"])
-            .posterior_predictive["gp"]
-            .values
-        )
+        pred_ref = pm.sample_posterior_predictive(
+            posterior,
+            var_names=["gp_star"],
+            progressbar=False,
+        ).posterior_predictive
 
     np.testing.assert_allclose(
-        pred.mean(),
-        pred_ref.mean(),
+        pred["gp_star"].mean(),
+        pred_ref["gp_star"].mean(),
         atol=0.1,
     )
 
     np.testing.assert_allclose(
-        pred.std(),
-        pred_ref.std(),
+        pred["gp_star"].std(),
+        pred_ref["gp_star"].std(),
         rtol=0.1,
     )
+
+    if inline:
+        assert np.testing.assert_allclose(
+            pred["gp_exp"],
+            np.exp(pred["gp_star"]),
+        )
+    else:
+        np.testing.assert_allclose(
+            pred["gp_exp"],
+            np.exp(posterior.posterior["gp"]),
+        )
 
 
 #

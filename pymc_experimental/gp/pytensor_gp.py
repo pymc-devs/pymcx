@@ -1,12 +1,12 @@
+from collections.abc import Sequence
+
 import pymc as pm
 import pytensor.tensor as pt
 
-from numpy.core.numeric import normalize_axis_tuple
 from pymc.distributions.distribution import Continuous
+from pymc.model.fgraph import fgraph_from_model, model_free_rv, model_from_fgraph
+from pytensor import Variable
 from pytensor.compile.builders import OpFromGraph
-from pytensor.tensor.einsum import _delta
-
-# from pymc.logprob.abstract import MeasurableOp
 
 
 class GPCovariance(OpFromGraph):
@@ -23,7 +23,7 @@ class GPCovariance(OpFromGraph):
         X2 = pt.sum(pt.square(X), axis=-1)
         Xs2 = pt.sum(pt.square(Xs), axis=-1)
 
-        sqd = -2.0 * X @ X.mT + (X2[..., :, None] + Xs2[..., None, :])
+        sqd = -2.0 * X @ Xs.mT + (X2[..., :, None] + Xs2[..., None, :])
         # sqd = -2.0 * pt.dot(X, pt.transpose(Xs)) + (
         #         pt.reshape(X2, (-1, 1)) + pt.reshape(Xs2, (1, -1))
         # )
@@ -68,25 +68,26 @@ def ExpQuad(X, X_new=None, *, ls):
     return ExpQuadCov.build_covariance(X, X_new, ls=ls)
 
 
-class WhiteNoiseCov(GPCovariance):
-    @classmethod
-    def white_noise_full(cls, X, sigma):
-        X_shape = tuple(X.shape)
-        shape = X_shape[:-1] + (X_shape[-2],)
+# class WhiteNoiseCov(GPCovariance):
+#     @classmethod
+#     def white_noise_full(cls, X, sigma):
+#         X_shape = tuple(X.shape)
+#         shape = X_shape[:-1] + (X_shape[-2],)
+#
+#         return _delta(shape, normalize_axis_tuple((-1, -2), X.ndim)) * sigma**2
+#
+#     @classmethod
+#     def build_covariance(cls, X, sigma):
+#         X = pt.as_tensor(X)
+#         sigma = pt.as_tensor(sigma)
+#
+#         ofg = cls(inputs=[X, sigma], outputs=[cls.white_noise_full(X, sigma)])
+#         return ofg(X, sigma)
 
-        return _delta(shape, normalize_axis_tuple((-1, -2), X.ndim)) * sigma**2
-
-    @classmethod
-    def build_covariance(cls, X, sigma):
-        X = pt.as_tensor(X)
-        sigma = pt.as_tensor(sigma)
-
-        ofg = cls(inputs=[X, sigma], outputs=[cls.white_noise_full(X, sigma)])
-        return ofg(X, sigma)
-
-
-def WhiteNoise(X, sigma):
-    return WhiteNoiseCov.build_covariance(X, sigma)
+#
+# def WhiteNoise(X, sigma):
+#     return WhiteNoiseCov.build_covariance(X, sigma)
+#
 
 
 class GP_RV(pm.MvNormal.rv_type):
@@ -106,6 +107,89 @@ class GP(Continuous):
         cov = pt.as_tensor(cov)
         mu = pt.zeros(cov.shape[-1])
         return super().dist([mu, cov], **kwargs)
+
+
+def conditional_gp(
+    model,
+    gp: Variable | str,
+    Xnew,
+    *,
+    jitter=1e-6,
+    dims: Sequence[str] = (),
+    inline: bool = False,
+):
+    """
+    Condition a GP on new data.
+
+    Parameters
+    ----------
+    model: Model
+    gp: Variable | str
+        The GP to condition on.
+    Xnew: Tensor-like
+        New data to condition the GP on.
+    jitter: float, default=1e-6
+        Jitter to add to the new GP covariance matrix.
+    dims: Sequence[str], default=()
+        Dimensions of the new GP.
+    inline: bool, default=False
+        Whether to inline the new GP in place of the old one. This is not always a safe operation.
+        If True, any variables that depend on the GP will be updated to depend on the new GP.
+
+    Returns
+    -------
+    Conditional model: Model
+        A new model with a GP free RV named f"{gp.name}_star" conditioned on the new data.
+
+    """
+
+    def _build_conditional(Xnew, f, cov, jitter):
+        if not isinstance(cov.owner.op, GPCovariance):
+            raise NotImplementedError(f"Cannot build conditional of {cov.owner.op} operation")
+        X, ls = cov.owner.inputs
+
+        Kxx = cov
+        Kxs = cov.owner.op.build_covariance(X, Xnew, ls=ls)
+        Kss = cov.owner.op.build_covariance(Xnew, ls=ls)
+
+        L = pt.linalg.cholesky(Kxx + pt.eye(X.shape[0]) * jitter)
+        # TODO: Use cho_solve
+        A = pt.linalg.solve_triangular(L, Kxs, lower=True)
+        v = pt.linalg.solve_triangular(L, f, lower=True)
+
+        mu = (A.mT @ v).T  # Vector?
+        cov = Kss - (A.mT @ A)
+
+        return mu, cov
+
+    if isinstance(gp, Variable):
+        assert model[gp.name] is gp
+    else:
+        gp = model[gp.name]
+
+    fgraph, memo = fgraph_from_model(model)
+    gp_model_var = memo[gp]
+    gp_rv = gp_model_var.owner.inputs[0]
+
+    if isinstance(gp_rv.owner.op, pm.MvNormal.rv_type):
+        _, cov = gp_rv.owner.op.dist_params(gp.owner)
+    else:
+        raise NotImplementedError("Can only condition on pure GPs")
+
+    # TODO: We should write the naive conditional covariance, and then have rewrites that lift it through kernels
+    mu_star, cov_star = _build_conditional(Xnew, gp_model_var, cov, jitter)
+    gp_rv_star = pm.MvNormal.dist(mu_star, cov_star, name=f"{gp.name}_star")
+
+    value = gp_rv_star.clone()
+    transform = None
+    gp_model_var_star = model_free_rv(gp_rv_star, value, transform, *dims)
+
+    if inline:
+        fgraph.replace(gp_model_var, gp_model_var_star, import_missing=True)
+    else:
+        fgraph.add_output(gp_model_var_star, import_missing=True)
+
+    return model_from_fgraph(fgraph, mutate_fgraph=True)
 
 
 # @register_canonicalize
