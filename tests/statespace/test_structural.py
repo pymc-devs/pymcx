@@ -2,6 +2,7 @@ import functools as ft
 import warnings
 
 from collections import defaultdict
+from copyreg import remove_extension
 from typing import Optional
 
 import numpy as np
@@ -592,13 +593,18 @@ def test_autoregressive_model(order, rng):
 
 @pytest.mark.parametrize("s", [10, 25, 50])
 @pytest.mark.parametrize("innovations", [True, False])
-def test_time_seasonality(s, innovations, rng):
+@pytest.mark.parametrize("remove_first_state", [True, False])
+def test_time_seasonality(s, innovations, remove_first_state, rng):
     def random_word(rng):
         return "".join(rng.choice(list("abcdefghijklmnopqrstuvwxyz")) for _ in range(5))
 
     state_names = [random_word(rng) for _ in range(s)]
     mod = st.TimeSeasonality(
-        season_length=s, innovations=innovations, name="season", state_names=state_names
+        season_length=s,
+        innovations=innovations,
+        name="season",
+        state_names=state_names,
+        remove_first_state=remove_first_state,
     )
     x0 = np.zeros(mod.k_states, dtype=floatX)
     x0[0] = 1
@@ -615,7 +621,8 @@ def test_time_seasonality(s, innovations, rng):
     # Check coords
     mod.build(verbose=False)
     _assert_basic_coords_correct(mod)
-    assert mod.coords["season_state"] == state_names[1:]
+    test_slice = slice(1, None) if remove_first_state else slice(None)
+    assert mod.coords["season_state"] == state_names[test_slice]
 
 
 def get_shift_factor(s):
