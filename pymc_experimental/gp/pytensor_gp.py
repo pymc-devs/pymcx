@@ -13,6 +13,24 @@ class GPCovariance(OpFromGraph):
     """OFG representing a GP covariance"""
 
     @staticmethod
+    def square_dist_Xs(X, Xs, ls):
+        assert X.ndim == 2, "Complain to Bill about it"
+        assert Xs.ndim == 2, "Complain to Bill about it"
+
+        X = X / ls
+        Xs = Xs / ls
+
+        X2 = pt.sum(pt.square(X), axis=-1)
+        Xs2 = pt.sum(pt.square(Xs), axis=-1)
+
+        sqd = -2.0 * X @ X.mT + (X2[..., :, None] + Xs2[..., None, :])
+        # sqd = -2.0 * pt.dot(X, pt.transpose(Xs)) + (
+        #         pt.reshape(X2, (-1, 1)) + pt.reshape(Xs2, (1, -1))
+        # )
+
+        return pt.clip(sqd, 0, pt.inf)
+
+    @staticmethod
     def square_dist(X, ls):
         X = X / ls
         X2 = pt.sum(pt.square(X), axis=-1)
@@ -27,20 +45,27 @@ class ExpQuadCov(GPCovariance):
     """
 
     @classmethod
-    def exp_quad_full(cls, X, ls):
-        return pt.exp(-0.5 * cls.square_dist(X, ls))
+    def exp_quad_full(cls, X, Xs, ls):
+        return pt.exp(-0.5 * cls.square_dist_Xs(X, Xs, ls))
 
     @classmethod
-    def build_covariance(cls, X, ls):
+    def build_covariance(cls, X, Xs=None, *, ls):
         X = pt.as_tensor(X)
+        if Xs is None:
+            Xs = X
+        else:
+            Xs = pt.as_tensor(Xs)
         ls = pt.as_tensor(ls)
 
-        ofg = cls(inputs=[X, ls], outputs=[cls.exp_quad_full(X, ls)])
-        return ofg(X, ls)
+        out = cls.exp_quad_full(X, Xs, ls)
+        if Xs is X:
+            return cls(inputs=[X, ls], outputs=[out])(X, ls)
+        else:
+            return cls(inputs=[X, Xs, ls], outputs=[out])(X, Xs, ls)
 
 
-def ExpQuad(X, ls):
-    return ExpQuadCov.build_covariance(X, ls)
+def ExpQuad(X, X_new=None, *, ls):
+    return ExpQuadCov.build_covariance(X, X_new, ls=ls)
 
 
 class WhiteNoiseCov(GPCovariance):
@@ -77,6 +102,7 @@ class GP(Continuous):
 
     @classmethod
     def dist(cls, cov, **kwargs):
+        # return Assert(msg="Don't know what a GP_RV is")(False)
         cov = pt.as_tensor(cov)
         mu = pt.zeros(cov.shape[-1])
         return super().dist([mu, cov], **kwargs)
