@@ -18,6 +18,7 @@ from pymc_extras.distributions import *
 from pymc_extras.inference.fit import fit
 from pymc_extras.model.marginal.marginal_model import MarginalModel, marginalize
 from pymc_extras.model.model_api import as_model
+from pymc_extras.sampling.mcmc import opt_sample
 from pymc_extras.version import __version__
 
 _log = logging.getLogger("pmx")

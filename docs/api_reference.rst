@@ -15,6 +15,7 @@ methods in the current release of PyMC experimental.
    MarginalModel
    marginalize
    model_builder.ModelBuilder
+   opt_sample
 
 Inference
 =========
