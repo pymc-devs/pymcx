@@ -275,10 +275,27 @@ class PyMCStateSpace:
         self.requirement_table.add_column("Constraints", justify="left")
         self.requirement_table.add_column("Dimensions", justify="right")
 
-        self._populate_prior_requirements()
-        self._populate_data_requirements()
+        has_prior_info = False
+        has_data_info = False
+        try:
+            self.param_info
+            has_prior_info = True
+        except NotImplementedError:
+            pass
 
-        if verbose:
+        try:
+            self.data_info
+            has_data_info = True
+        except NotImplementedError:
+            pass
+
+        if has_prior_info:
+            self._populate_prior_requirements()
+
+        if has_data_info:
+            self._populate_data_requirements()
+
+        if verbose and (has_prior_info or has_data_info):
             console = Console()
             console.print(self.requirement_table)
 
@@ -296,11 +313,6 @@ class PyMCStateSpace:
         """
         Add requirements about the data needed for the model, including their names, shapes, and named dimensions.
         """
-        try:
-            self.data_info
-        except NotImplementedError:
-            return
-
         self.requirement_table.add_section()
 
         for data, info in self.data_info.items():
