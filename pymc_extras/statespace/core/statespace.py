@@ -270,7 +270,7 @@ class PyMCStateSpace:
             "calling the build_statespace_graph method."
         )
 
-        self.requirement_table.add_column("Variable", justify="right")
+        self.requirement_table.add_column("Variable", justify="left")
         self.requirement_table.add_column("Shape", justify="left")
         self.requirement_table.add_column("Constraints", justify="left")
         self.requirement_table.add_column("Dimensions", justify="right")
