@@ -54,24 +54,28 @@ def test_jax_functions_from_graph(gradient_backend: GradientBackend):
 
 
 @pytest.mark.parametrize(
-    "method, use_grad, use_hess",
+    "method, use_grad, use_hess, use_hessp",
     [
-        ("nelder-mead", False, False),
-        ("powell", False, False),
-        ("CG", True, False),
-        ("BFGS", True, False),
-        ("L-BFGS-B", True, False),
-        ("TNC", True, False),
-        ("SLSQP", True, False),
-        ("dogleg", True, True),
-        ("trust-ncg", True, True),
-        ("trust-exact", True, True),
-        ("trust-krylov", True, True),
-        ("trust-constr", True, True),
+        ("nelder-mead", False, False, False),
+        ("powell", False, False, False),
+        ("CG", True, False, False),
+        ("BFGS", True, False, False),
+        ("L-BFGS-B", True, False, False),
+        ("TNC", True, False, False),
+        ("SLSQP", True, False, False),
+        ("dogleg", True, True, False),
+        ("Newton-CG", True, True, False),
+        ("Newton-CG", True, False, True),
+        ("trust-ncg", True, True, False),
+        ("trust-ncg", True, False, True),
+        ("trust-exact", True, True, False),
+        ("trust-krylov", True, True, False),
+        ("trust-krylov", True, False, True),
+        ("trust-constr", True, True, False),
     ],
 )
 @pytest.mark.parametrize("gradient_backend", ["jax", "pytensor"], ids=str)
-def test_JAX_map(method, use_grad, use_hess, gradient_backend: GradientBackend, rng):
+def test_JAX_map(method, use_grad, use_hess, use_hessp, gradient_backend: GradientBackend, rng):
     extra_kwargs = {}
     if method == "dogleg":
         # HACK -- dogleg requires that the hessian of the objective function is PSD, so we have to pick a point
@@ -88,6 +92,7 @@ def test_JAX_map(method, use_grad, use_hess, gradient_backend: GradientBackend, 
             **extra_kwargs,
             use_grad=use_grad,
             use_hess=use_hess,
+            use_hessp=use_hessp,
             progressbar=False,
             gradient_backend=gradient_backend,
             compile_kwargs={"mode": "JAX"},

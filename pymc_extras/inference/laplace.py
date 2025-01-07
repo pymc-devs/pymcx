@@ -16,6 +16,7 @@
 import logging
 
 from functools import reduce
+from importlib.util import find_spec
 from itertools import product
 from typing import Literal
 
@@ -231,7 +232,7 @@ def add_data_to_inferencedata(
     return idata
 
 
-def fit_mvn_to_MAP(
+def fit_mvn_at_MAP(
     optimized_point: dict[str, np.ndarray],
     model: pm.Model | None = None,
     on_bad_cov: Literal["warn", "error", "ignore"] = "ignore",
@@ -276,6 +277,9 @@ def fit_mvn_to_MAP(
     inverse_hessian: np.ndarray
         The inverse Hessian matrix of the log-posterior evaluated at the MAP estimate.
     """
+    if gradient_backend == "jax" and not find_spec("jax"):
+        raise ImportError("JAX must be installed to use JAX gradients")
+
     model = pm.modelcontext(model)
     compile_kwargs = {} if compile_kwargs is None else compile_kwargs
     frozen_model = freeze_dims_and_data(model)
@@ -344,8 +348,10 @@ def sample_laplace_posterior(
 
     Parameters
     ----------
-    mu
-    H_inv
+    mu: RaveledVars
+        The MAP estimate of the model parameters.
+    H_inv: np.ndarray
+        The inverse Hessian matrix of the log-posterior evaluated at the MAP estimate.
     model : Model
         A PyMC model
     chains : int
@@ -384,9 +390,7 @@ def sample_laplace_posterior(
             constrained_rvs, replace={unconstrained_vector: batched_values}
         )
 
-        f_constrain = pm.compile_pymc(
-            inputs=[batched_values], outputs=batched_rvs, **compile_kwargs
-        )
+        f_constrain = pm.compile(inputs=[batched_values], outputs=batched_rvs, **compile_kwargs)
         posterior_draws = f_constrain(posterior_draws)
 
     else:
@@ -472,15 +476,17 @@ def fit_laplace(
         and 1).
 
         .. warning::
-            This argumnet should be considered highly experimental. It has not been verified if this method produces
+            This argument should be considered highly experimental. It has not been verified if this method produces
             valid draws from the posterior. **Use at your own risk**.
 
     gradient_backend: str, default "pytensor"
         The backend to use for gradient computations. Must be one of "pytensor" or "jax".
     chains: int, default: 2
-        The number of sampling chains running in parallel.
+        The number of chain dimensions to sample. Note that this is *not* the number of chains to run in parallel,
+        because the Laplace approximation is not an MCMC method. This argument exists to ensure that outputs are
+        compatible with the ArviZ library.
     draws: int, default: 500
-        The number of samples to draw from the approximated posterior.
+        The number of samples to draw from the approximated posterior. Totals samples will be chains * draws.
     on_bad_cov : str, one of 'ignore', 'warn', or 'error', default: 'ignore'
         What to do when ``H_inv`` (inverse Hessian) is not positive semi-definite.
         If 'ignore' or 'warn', the closest positive-semi-definite matrix to ``H_inv`` (in L1 norm) will be returned.
@@ -547,11 +553,12 @@ def fit_laplace(
         **optimizer_kwargs,
     )
 
-    mu, H_inv = fit_mvn_to_MAP(
+    mu, H_inv = fit_mvn_at_MAP(
         optimized_point=optimized_point,
         model=model,
         on_bad_cov=on_bad_cov,
         transform_samples=fit_in_unconstrained_space,
+        gradient_backend=gradient_backend,
         zero_tol=zero_tol,
         diag_jitter=diag_jitter,
         compile_kwargs=compile_kwargs,
