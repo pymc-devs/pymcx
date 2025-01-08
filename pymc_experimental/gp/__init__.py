@@ -14,5 +14,6 @@
 
 
 from pymc_experimental.gp.latent_approx import KarhunenLoeveExpansion, ProjectedProcess
+from pymc_experimental.gp.svgp import SVGP
 
-__all__ = ["KarhunenLoeveExpansion", "ProjectedProcess"]
+__all__ = ["KarhunenLoeveExpansion", "ProjectedProcess", "SVGP"]
