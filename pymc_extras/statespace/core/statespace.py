@@ -257,6 +257,53 @@ class PyMCStateSpace:
         self.kalman_smoother = KalmanSmoother()
         self.make_symbolic_graph()
 
+        self._populate_prior_requirements()
+        self._populate_data_requirements()
+
+        if verbose and self.requirement_table:
+            console = Console()
+            console.print(self.requirement_table)
+
+    def _populate_prior_requirements(self) -> None:
+        """
+        Add requirements about priors needed for the model to a rich table, including their names,
+        shapes, named dimensions, and any parameter constraints.
+        """
+        # Check that the param_info class is implemented, and also that it's a dictionary. We can't proceed if either
+        # is not true.
+        try:
+            if not isinstance(self.param_info, dict):
+                return
+        except NotImplementedError:
+            return
+
+        if self.requirement_table is None:
+            self._initialize_requirement_table()
+
+        for param, info in self.param_info.items():
+            self.requirement_table.add_row(
+                param, str(info["shape"]), info["constraints"], str(info["dims"])
+            )
+
+    def _populate_data_requirements(self) -> None:
+        """
+        Add requirements about the data needed for the model, including their names, shapes, and named dimensions.
+        """
+        try:
+            if not isinstance(self.data_info, dict):
+                return
+        except NotImplementedError:
+            return
+
+        if self.requirement_table is None:
+            self._initialize_requirement_table()
+        else:
+            self.requirement_table.add_section()
+
+        for data, info in self.data_info.items():
+            self.requirement_table.add_row(data, str(info["shape"]), "pm.Data", str(info["dims"]))
+
+    def _initialize_requirement_table(self) -> None:
         self.requirement_table = Table(
             show_header=True,
             show_edge=True,
@@ -274,49 +321,6 @@ class PyMCStateSpace:
         self.requirement_table.add_column("Shape", justify="left")
         self.requirement_table.add_column("Constraints", justify="left")
         self.requirement_table.add_column("Dimensions", justify="right")
-
-        has_prior_info = False
-        has_data_info = False
-        try:
-            self.param_info
-            has_prior_info = True
-        except NotImplementedError:
-            pass
-
-        try:
-            self.data_info
-            has_data_info = True
-        except NotImplementedError:
-            pass
-
-        if has_prior_info:
-            self._populate_prior_requirements()
-
-        if has_data_info:
-            self._populate_data_requirements()
-
-        if verbose and (has_prior_info or has_data_info):
-            console = Console()
-            console.print(self.requirement_table)
-
-    def _populate_prior_requirements(self) -> None:
-        """
-        Add requirements about priors needed for the model to a rich table, including their names,
-        shapes, named dimensions, and any parameter constraints.
-        """
-        for param, info in self.param_info.items():
-            self.requirement_table.add_row(
-                param, str(info["shape"]), info["constraints"], str(info["dims"])
-            )
-
-    def _populate_data_requirements(self) -> None:
-        """
-        Add requirements about the data needed for the model, including their names, shapes, and named dimensions.
-        """
-        self.requirement_table.add_section()
-
-        for data, info in self.data_info.items():
-            self.requirement_table.add_row(data, str(info["shape"]), "pm.Data", str(info["dims"]))
 
     def _unpack_statespace_with_placeholders(
         self,
