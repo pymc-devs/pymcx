@@ -257,6 +257,7 @@ class PyMCStateSpace:
         self.kalman_smoother = KalmanSmoother()
         self.make_symbolic_graph()
 
+        self.requirement_table = None
         self._populate_prior_requirements()
         self._populate_data_requirements()
 
