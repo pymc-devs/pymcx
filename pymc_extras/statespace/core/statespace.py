@@ -983,10 +983,31 @@ class PyMCStateSpace:
         list[pm.Flat]
             A list of pm.Flat variables representing all parameters estimated by the model.
         """
+
+        def infer_variable_shape(name):
+            shape = self._name_to_variable[name].type.shape
+            if not any(dim is None for dim in shape):
+                return shape
+
+            dim_names = self._fit_dims.get(name, None)
+            if dim_names is None:
+                raise ValueError(
+                    f"Could not infer shape for {name}, because it was not given coords during model"
+                    f"fitting"
+                )
+
+            shape_from_coords = tuple([len(self._fit_coords[dim]) for dim in dim_names])
+            return tuple(
+                [
+                    shape[i] if shape[i] is not None else shape_from_coords[i]
+                    for i in range(len(shape))
+                ]
+            )
+
         for name in self.param_names:
             pm.Flat(
                 name,
-                shape=self._name_to_variable[name].type.shape,
+                shape=infer_variable_shape(name),
                 dims=self._fit_dims.get(name, None),
             )
 

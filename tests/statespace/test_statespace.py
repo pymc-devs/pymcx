@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from functools import partial
 
 import numpy as np
@@ -347,6 +348,59 @@ def test_sampling_methods(group, kind, ss_mod, idata, rng):
         for output in ["latent", "observed"]:
             assert f"{group}_{output}" in test_idata
             assert not np.any(np.isnan(test_idata[f"{group}_{output}"].values))
+
+
+@pytest.mark.filterwarnings("ignore:Provided data contains missing values")
+def test_sample_conditional_with_time_varying():
+    class TVCovariance(PyMCStateSpace):
+        def __init__(self):
+            super().__init__(k_states=1, k_endog=1, k_posdef=1)
+
+        def make_symbolic_graph(self) -> None:
+            self.ssm["transition", 0, 0] = 1.0
+
+            self.ssm["design", 0, 0] = 1.0
+
+            sigma_cov = self.make_and_register_variable("sigma_cov", (None,))
+            self.ssm["state_cov"] = sigma_cov[:, None, None] ** 2
+
+        @property
+        def param_names(self) -> list[str]:
+            return ["sigma_cov"]
+
+        @property
+        def coords(self) -> dict[str, Sequence[str]]:
+            return make_default_coords(self)
+
+        @property
+        def state_names(self) -> list[str]:
+            return ["level"]
+
+        @property
+        def observed_states(self) -> list[str]:
+            return ["level"]
+
+        @property
+        def shock_names(self) -> list[str]:
+            return ["level"]
+
+    ss_mod = TVCovariance()
+    empty_data = pd.DataFrame(
+        np.nan, index=pd.date_range("2020-01-01", periods=100, freq="D"), columns=["data"]
+    )
+
+    coords = ss_mod.coords
+    coords["time"] = empty_data.index
+    with pm.Model(coords=coords) as mod:
+        log_sigma_cov = pm.Normal("log_sigma_cov", mu=0, sigma=0.1, dims=["time"])
+        pm.Deterministic("sigma_cov", pm.math.exp(log_sigma_cov.cumsum()), dims=["time"])
+
+        ss_mod.build_statespace_graph(data=empty_data)
+
+        prior = pm.sample_prior_predictive(10)
+
+    ss_mod.sample_unconditional_prior(prior)
+    ss_mod.sample_conditional_prior(prior)
 
 
 def _make_time_idx(mod, use_datetime_index=True):
