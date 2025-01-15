@@ -3,8 +3,9 @@ import pytensor.tensor as pt
 import pymc as pm
 import numpy as np
 
-import jax
 import optax
+import jax
+import jax.random as jr
 
 from pymc.gp.util import stabilize
 from pymc.sampling.jax import get_jaxified_graph
@@ -39,17 +40,28 @@ class SVGP:
         
         self.initialize()
 
+    def initialize(self, model=None):
+        with pm.modelcontext(model):
+            
+            self.z = pm.Flat("z", shape=(self.n_inducing, self.input_dim), initval=self.z_init)
+            self.variational_mean = pm.Flat("variational_mean", shape=self.n_inducing)
+            variational_root_chol, _, _ = pm.LKJCholeskyCov(
+                "vrc", n=self.n_inducing, eta=1.0, sd_dist=self.variational_sd_dist,
+            )
+            self.variational_root_covariance = variational_root_chol @ variational_root_chol.T
+
     def kl_divergence(self):
         mu = self.variational_mean
         sqrt = self.variational_root_covariance
-        z = self.inducing_inputs
+        z = self.z
 
         muz = self.mean_func(z)
         Kzz = self.cov_func(z)
-        return self.kl_mvn(mu.flatten(), sqrt, muz, Kzz)
+        return self.kl_mvn(mu, sqrt @ sqrt.T, muz, Kzz)
     
     @staticmethod
     def kl_mvn(mu1, K1, mu2, K2):
+        # TODO, rewrite to tale in cholesky L1 instead of K1
         d = mu2 - mu1
 
         K1 = stabilize(K1)
@@ -72,122 +84,68 @@ class SVGP:
         return (term1 + term2 + term3 - d.shape[0]) / 2.0
 
     def predict(self, t, sigma=None):
-        mu = self.variational_mean.flatten()
+        mu = self.variational_mean
         sqrt = self.variational_root_covariance
-        z = self.inducing_inputs
 
-        muz = self.mean_func(z)
-        Kzz = stabilize(self.cov_func(z))
+        muz = self.mean_func(self.z)
+        Kzz = stabilize(self.cov_func(self.z))
         Lz = pt.linalg.cholesky(Kzz)
 
         Ktt = stabilize(self.cov_func(t))
-        Kzt = self.cov_func(z, t)
+        
         mut = self.mean_func(t)
-
+        Kzt = self.cov_func(self.z, t)
+        
         Lz_inv_Kzt = pt.linalg.solve_triangular(Lz, Kzt, lower=True)  # Lz⁻¹ Kzt
-        Kzz_inv_Kzt = pt.linalg.solve_triangular(Lz.T, Lz_inv_Kzt, lower=False)  # Kzz⁻¹ Kzt
-        Ktz_Kzz_inv_sqrt = pt.matmul(Kzz_inv_Kzt.T, sqrt)  # Ktz Kzz⁻¹ sqrt
+        Kzz_inv_Kzt = pt.linalg.solve_triangular(Lz.mT, Lz_inv_Kzt, lower=False)  # Kzz⁻¹ Kzt
+        Ktz_Kzz_inv_sqrt = pt.matmul(Kzz_inv_Kzt.mT, sqrt)  # Ktz Kzz⁻¹ sqrt
 
-        mean = mut + pt.matmul(Kzz_inv_Kzt.T, mu - muz)  # μt + Ktz Kzz⁻¹ (μ - μz)
+        mean = mut + pt.matmul(Kzz_inv_Kzt.mT, mu - muz)  # μt + Ktz Kzz⁻¹ (μ - μz)
 
         if sigma is None:
-            noise = 0.0
+            noise = (1e-6)**2 * pt.identity_like(Ktt)
         else:
             noise = sigma**2 * pt.identity_like(Ktt)
         
         covariance = (
             Ktt
-            - pt.matmul(Lz_inv_Kzt.T, Lz_inv_Kzt)
-            + pt.matmul(Ktz_Kzz_inv_sqrt, Ktz_Kzz_inv_sqrt.T)
+            - pt.matmul(Lz_inv_Kzt.mT, Lz_inv_Kzt)
+            + pt.matmul(Ktz_Kzz_inv_sqrt, Ktz_Kzz_inv_sqrt.mT)
             + noise
         )
         return mean, covariance
-
-    def compile_pred_func_cov(self, mode="FAST_RUN", model=None):
-        t = pt.tensor("t", shape=(None, 1)) # increase 1 for multioutput
-        mu, cov = self.predict(t)
-        
-        with pm.modelcontext(model) as model:
-            mu_value, cov_value = model.replace_rvs_by_values([mu, cov])
-        
-        inputs = pm.inputvars([mu_value, cov_value])
-        f_predict = pytensor.function(
-            inputs=inputs,
-            outputs=[mu_value, cov_value],
-            on_unused_input="ignore",
-            mode=mode,
-        )
-        return partial(
-            self.predict_f,
-            inputs=inputs,
-            f_predict=f_predict,
-        )
-
-    def compile_pred_func_sd(self, sigma=None, mode="FAST_RUN", model=None):
-        t = pt.tensor("t", shape=(None, 1)) # increase 1 for multioutput
-        #mu, cov = self.predict(t)
-        predict = partial(self.predict, sigma=sigma)
-        predict_var = pt.vectorize(predict, "(k, a) -> (a), (a, a)")
-        t = pt.as_tensor(t)
-        mu, var = predict_var(t[..., None])
-        mu, sd = mu.ravel(), pt.sqrt(var).ravel()
-        
-        with pm.modelcontext(model) as model:
-            mu_value, sd_value = model.replace_rvs_by_values([mu, sd])
-            
-        inputs = pm.inputvars([mu_value, sd_value])
-        f_predict = pytensor.function(
-            inputs=inputs,
-            outputs=[mu_value, sd_value],
-            on_unused_input="ignore",
-            mode=mode,
-        )
-        return partial(
-            self.predict_f,
-            inputs=inputs,
-            f_predict=f_predict,
-        )
-
-    def predict_f(self, X_pred, result_dict, inputs, f_predict):
-        input_names = [x.name for x in inputs]
-        mu_pred, cov_pred = f_predict(
-            **{k: v for k, v in result_dict.items() if k in input_names}, t=X_pred
-        )
-        return mu_pred, cov_pred
     
-    def variational_expectation(self, X, y):
-        func = pt.vectorize(self.predict, "(k, a) -> (a), (a, a)")
-        X = pt.as_tensor(X)
-        mean, variance = func(X[..., None])
-        mean = mean.ravel()
-        variance = variance.ravel()
+    def variational_expectation(self, X_batch, y_batch):
+
+        X_batch = pt.as_tensor(X_batch)
+        
+        def diag_predict(X_batch):
+            mean, cov = self.predict(X_batch)
+            return mean, pt.diag(cov)
+
+        func = pt.vectorize(diag_predict, "(o, k) -> (o), (o)")
+        mean, variance = func(pt.expand_dims(X_batch, -2))
+        
         ## integrate expectation
-        sq_error = pt.square(y - mean[:, None])
+        sq_error = pt.square(y_batch - mean)
         expectation = -0.5 * pt.sum(
-            pt.log(2.0 * pt.pi) + pt.log(self.sigma**2) + (sq_error + variance[:, None]) / self.sigma**2, axis=1
+            pt.log(2.0 * pt.pi) + pt.log(self.sigma**2) + (sq_error + variance) / self.sigma**2, axis=1
         )
         return expectation
 
-    def initialize(self, model=None):
-        with pm.modelcontext(model):
-            
-            self.inducing_inputs = pm.Flat("inducing_inputs", shape=(self.n_inducing, self.input_dim), initval=self.z_init)
-            self.variational_mean = pm.Flat("variational_mean", shape=(self.n_inducing, self.input_dim))
-            variational_root_chol, _, _ = pm.LKJCholeskyCov(
-                "vrc", n=self.n_inducing, eta=1.0, sd_dist=self.variational_sd_dist,
-            )
-            self.variational_root_covariance = variational_root_chol @ variational_root_chol.T
-
-    def elbo(self, X, y):
-        var_exp = self.variational_expectation(X, y)
+    def elbo(self, X_batch, y_batch):
+        var_exp = self.variational_expectation(X_batch, y_batch)
         #n, b = X.shape[0].eval(), X.shape[0]
         return (self.n_data / self.batch_size) * pt.sum(var_exp).squeeze() - self.kl_divergence()
 
     def fit(self, X_data, y_data, optimizer, params=None, n_steps=100_000, model=None):
         
+        if X_data.ndim != 2 or y_data.ndim != 2:
+            raise ValueError("no")
+        
         with pm.modelcontext(model) as model:
             loss = -self.elbo(model["X"], model["y"])
-            training_step = make_training_step_fn(model, loss, optimizer, batch_size=self.batch_size)
+            training_step = make_training_step_fn(model, loss, optimizer, self.input_dim, batch_size=self.batch_size)
 
         if params is None:
             initial_point = model.initial_point()
@@ -199,13 +157,16 @@ class SVGP:
         loss_history = []
         for step in range(n_steps):
             try:
-                batch_slice = np.random.choice(X_data.shape[0], size=self.batch_size, replace=False)
+                batch_slice = np.random.choice(self.n_data, size=self.batch_size, replace=False)
                 params, optimizer_state, loss_value = training_step(
                     X_data[batch_slice, :],
-                    y_data[batch_slice],
+                    y_data[batch_slice, :],
                     params,
                     optimizer_state,
                 )
+                if (len(loss_history) > 1) and (loss_value < loss_history[-1]):
+                    best_params = params
+                
                 loss_history.append(loss_value)
     
                 if step % 100 == 0:
@@ -215,14 +176,126 @@ class SVGP:
                 break
             
         print(f"Iteration: {step + 1}, Loss: {loss_value:.2f}, finished.", end="\r")
+        return best_params, loss_history
 
-        return params, loss_history
+    @staticmethod
+    def get_batch(X, y, n, batch_size: int, key):
+        # Subsample mini-batch indices with replacement.
+        indices = jr.choice(key, n, (batch_size,), replace=True)
+        return X[indices, :], y[indices]
+    
+    def fit_scan(
+        self, 
+        X_data, 
+        y_data,
+        optimizer, 
+        params=None,
+        num_iters=100_000, 
+        model=None,
+        unroll=1,
+        key = jr.PRNGKey(42)
+    ):
+
+        X_data = jax.numpy.array(X_data)
+        y_data = jax.numpy.array(y_data)
+        
+        with pm.modelcontext(model) as model:
+            loss = -self.elbo(model["X"], model["y"])
+
+        point = model.initial_point()
+        [loss_w_values] = model.replace_rvs_by_values([loss])
+        # [loss2], joined_inputs = pm.pytensorf.join_nonshared_inputs(
+        #    point=point, outputs=[loss_w_values], inputs=model.continuous_value_vars# + pm.inputvars(loss) # for pt.tensor
+        # )
+        # replace X, y with their minibatch
+        X_batch = pt.tensor("X_batch", shape=(self.batch_size, self.input_dim))
+        y_batch = pt.tensor("y_batch", shape=(self.batch_size, 1))
+    
+        X, y = model["X"], model["y"]
+        loss2 = pytensor.graph.graph_replace(
+            loss_w_values,
+            replace={
+                X: X_batch,
+                y: y_batch,
+            },
+        )
+    
+        f_loss_jax = get_jaxified_graph(
+            [X_batch, y_batch, *model.continuous_value_vars], outputs=[loss2]
+        )
+
+        def f_loss(X, y, params):
+            return f_loss_jax(X, y, *params)[0]
+        
+        if params is None:
+            initial_point = model.initial_point()
+            params = tuple(initial_point.values())
+        
+        optimizer_state = optimizer.init(params)
+        var_names = model.initial_point().keys()
+
+        # Initialise optimiser state.
+        opt_state = optimizer.init(params)
+    
+        # Mini-batch random keys to scan over.
+        iter_keys = jr.split(key, num_iters)
+        
+        def step(carry, key):
+            params, opt_state = carry
+            X_data_batch, y_data_batch = self.get_batch(X_data, y_data, self.n_data, self.batch_size, key)
+            loss_val, loss_grads = jax.value_and_grad(f_loss, 2)(X_data_batch, y_data_batch, params)
+            updates, opt_state = optimizer.update(loss_grads, opt_state, params)
+            params = optax.apply_updates(params, updates)
+            return (params, opt_state), loss_val
+
+        (params, _), history = jax.lax.scan(step, (params, opt_state), (iter_keys), unroll=unroll)
+        return params, history
+        
+    
+    def compile_pred_func(self, sigma=None, diag=False, mode="FAST_RUN", model=None):
+        t = pt.tensor("t", shape=(None, self.input_dim))
+
+        if diag:
+            def diag_predict(X):
+                mean, cov = self.predict(X, sigma=sigma)
+                return mean, pt.diag(cov)
+            
+            func = pt.vectorize(diag_predict, "(o, k) -> (o), (o)")
+            #mu, cov = func(t[..., None]) # cov is actually a variance
+            mu, cov = func(pt.expand_dims(t, -2))
+        else:
+            mu, cov = self.predict(t, sigma=sigma)
+       
+        
+        with pm.modelcontext(model) as model:
+            mu_value, cov_value = model.replace_rvs_by_values([mu, cov])
+        
+        inputs = pm.inputvars([mu_value, cov_value])
+        f_predict = pytensor.function(
+            inputs=inputs,
+            outputs=[mu_value.squeeze(), cov_value.squeeze()],
+            on_unused_input="ignore",
+            mode=mode,
+        )
+        return partial(
+            self._predict_f,
+            inputs=inputs,
+            f_predict=f_predict,
+        )
+
+    def _predict_f(self, X_pred, result_dict, inputs, f_predict):
+        input_names = [x.name for x in inputs]
+        mu_pred, cov_pred = f_predict(
+            **{k: v for k, v in result_dict.items() if k in input_names}, t=X_pred
+        )
+        return mu_pred, cov_pred
 
 
 def make_training_step_fn(
     model,
     loss,
     optimizer,
+    input_dim,
     batch_size=512,
     n_devices=1,
 ):
@@ -232,10 +305,10 @@ def make_training_step_fn(
     #    point=point, outputs=[loss_w_values], inputs=model.continuous_value_vars# + pm.inputvars(loss) # for pt.tensor
     # )
     # replace X, y with their minibatch
-    X, y = model["X"], model["y"]
-    X_batch = pt.tensor("X_batch", shape=(batch_size, X.get_value().shape[1]))
+    X_batch = pt.tensor("X_batch", shape=(batch_size, input_dim))
     y_batch = pt.tensor("y_batch", shape=(batch_size, 1))
 
+    X, y = model["X"], model["y"]
     loss2 = pytensor.graph.graph_replace(
         loss_w_values,
         replace={
@@ -244,6 +317,12 @@ def make_training_step_fn(
         },
     )
 
+    
+    # to have in pytensor not jax:
+    # loss2 = pymc.pytensorf.rewrite_pregrad(loss2) 
+    # grad = pt.grad(loss2, model.continue_value_vars)
+    #  f_value_and_grad = pytensor.function(inputs=[X_batch, ...], ouputs = [loss2, grad], **compile_kwargs)
+    
     f_loss_jax = get_jaxified_graph(
         [X_batch, y_batch, *model.continuous_value_vars], outputs=[loss2]
     )
@@ -254,11 +333,14 @@ def make_training_step_fn(
     #)
 
     def f_loss(X, y, params):
+        #print("two", X.shape, y.shape, len(params))
         return f_loss_jax(X, y, *params)[0]
 
     # @partial(jax.pmap, axis_name="device")
     @jax.jit
     def training_step(X, y, params, optimizer_state):
+        
+        #print("one", X.shape, y.shape)
         loss, grads = jax.value_and_grad(f_loss, 2)(X, y, params)
 
         ## with partial(jax.pmap), comment if that decor is gone
