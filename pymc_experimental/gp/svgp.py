@@ -45,9 +45,11 @@ class SVGP:
             
             self.z = pm.Flat("z", shape=(self.n_inducing, self.input_dim), initval=self.z_init)
             self.variational_mean = pm.Flat("variational_mean", shape=self.n_inducing)
-            variational_root_chol, _, _ = pm.LKJCholeskyCov(
-                "vrc", n=self.n_inducing, eta=1.0, sd_dist=self.variational_sd_dist,
-            )
+            #variational_root_chol, _, _ = pm.LKJCholeskyCov(
+            #    "vrc", n=self.n_inducing, eta=1.0, sd_dist=self.variational_sd_dist,
+            #)
+            variational_root_chol = pm.Flat("vrc", shape=self.n_inducing * (self.n_inducing + 1) // 2)
+            variational_root_chol = pm.expand_packed_triangular(self.n_inducing, variational_root_chol)
             self.variational_root_covariance = variational_root_chol @ variational_root_chol.T
 
     def kl_divergence(self):
