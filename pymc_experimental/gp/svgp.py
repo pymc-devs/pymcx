@@ -169,7 +169,7 @@ class SVGP:
                 
                 loss_history.append(loss_value)
     
-                if step % 100 == 0:
+                if step % 10 == 0:
                     print(f"Iteration: {step}, Loss: {loss_value:.2f}", end="\r")
             
             except KeyboardInterrupt:
