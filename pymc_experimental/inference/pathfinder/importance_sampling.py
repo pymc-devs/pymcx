@@ -1,57 +1,47 @@
 import logging
 import warnings
 
+from dataclasses import dataclass, field
 from typing import Literal
 
 import arviz as az
 import numpy as np
-import pytensor.tensor as pt
 
-from pytensor.graph import Apply, Op
+from numpy.typing import NDArray
+from scipy.special import logsumexp
 
 logger = logging.getLogger(__name__)
 
 
-class PSIS(Op):
-    __props__ = ()
+@dataclass(frozen=True)
+class ImportanceSamplingResult:
+    """container for importance sampling results"""
 
-    def make_node(self, inputs):
-        logweights = pt.as_tensor(inputs)
-        psislw = pt.dvector()
-        pareto_k = pt.dscalar()
-        return Apply(self, [logweights], [psislw, pareto_k])
-
-    def perform(self, node: Apply, inputs, outputs) -> None:
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", category=RuntimeWarning, message="overflow encountered in exp"
-            )
-            logweights = inputs[0]
-            psislw, pareto_k = az.psislw(logweights)
-            outputs[0][0] = psislw
-            outputs[1][0] = pareto_k
+    samples: NDArray
+    pareto_k: float | None = None
+    warnings: list[str] = field(default_factory=list)
+    method: str = "none"
 
 
 def importance_sampling(
-    samples: np.ndarray,
-    logP: np.ndarray,
-    logQ: np.ndarray,
+    samples: NDArray,
+    logP: NDArray,
+    logQ: NDArray,
     num_draws: int,
-    method: Literal["psis", "psir", "identity", "none"],
-    logiw: np.ndarray | None = None,
+    method: Literal["psis", "psir", "identity", "none"] | None,
     random_seed: int | None = None,
-) -> np.ndarray:
+):
     """Pareto Smoothed Importance Resampling (PSIR)
     This implements the Pareto Smooth Importance Resampling (PSIR) method, as described in Algorithm 5 of Zhang et al. (2022). The PSIR follows a similar approach to Algorithm 1 PSIS diagnostic from Yao et al., (2018). However, before computing the the importance ratio r_s, the logP and logQ are adjusted to account for the number multiple estimators (or paths). The process involves resampling from the original sample with replacement, with probabilities proportional to the computed importance weights from PSIS.
 
     Parameters
     ----------
-    samples : np.ndarray
-        samples from proposal distribution
-    logP : np.ndarray
-        log probability of target distribution
-    logQ : np.ndarray
-        log probability of proposal distribution
+    samples : NDArray
+        samples from proposal distribution, shape (L, M, N)
+    logP : NDArray
+        log probability values of target distribution, shape (L, M)
+    logQ : NDArray
+        log probability values of proposal distribution, shape (L, M)
     num_draws : int
         number of draws to return where num_draws <= samples.shape[0]
     method : str, optional
@@ -60,7 +50,7 @@ def importance_sampling(
 
     Returns
     -------
-    np.ndarray
+    NDArray
         importance sampled draws
 
     Future work!
@@ -78,13 +68,14 @@ def importance_sampling(
     Zhang, L., Carpenter, B., Gelman, A., & Vehtari, A. (2022). Pathfinder: Parallel quasi-Newton variational inference. Journal of Machine Learning Research, 23(306), 1-49.
     """
 
-    num_paths, num_pdraws, N = samples.shape
+    warning_msgs = []
+    num_paths, _, N = samples.shape
 
     if method == "none":
-        logger.warning(
-            "importance sampling is disabled. The samples are returned as is which may include samples from failed paths with non-finite logP or logQ values. It is recommended to use importance_sampling='psis' for better stability."
+        warning_msgs.append(
+            "Importance sampling is disabled. The samples are returned as is which may include samples from failed paths with non-finite logP or logQ values. It is recommended to use importance_sampling='psis' for better stability."
         )
-        return samples
+        return ImportanceSamplingResult(samples=samples, warnings=warning_msgs)
     else:
         samples = samples.reshape(-1, N)
         logP = logP.ravel()
@@ -96,47 +87,53 @@ def importance_sampling(
         logQ -= log_I
         logiw = logP - logQ
 
-        if method == "psis":
-            replace = False
-            logiw, pareto_k = PSIS()(logiw)
-        elif method == "psir":
-            replace = True
-            logiw, pareto_k = PSIS()(logiw)
-        elif method == "identity":
-            replace = False
-            logiw = logiw
-            pareto_k = None
-        else:
-            raise ValueError(f"Invalid importance sampling method: {method}")
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", category=RuntimeWarning, message="overflow encountered in exp"
+            )
+            if method == "psis":
+                replace = False
+                logiw, pareto_k = az.psislw(logiw)
+            elif method == "psir":
+                replace = True
+                logiw, pareto_k = az.psislw(logiw)
+            elif method == "identity":
+                replace = False
+                pareto_k = None
+            else:
+                raise ValueError(f"Invalid importance sampling method: {method}")
 
     # NOTE: Pareto k is normally bad for Pathfinder even when the posterior is close to the NUTS posterior or closer to NUTS than ADVI.
     # Pareto k may not be a good diagnostic for Pathfinder.
-    if pareto_k is not None:
-        pareto_k = pareto_k.eval()
-        if pareto_k < 0.5:
-            pass
-        elif 0.5 <= pareto_k < 0.70:
-            logger.info(
-                f"Pareto k value ({pareto_k:.2f}) is between 0.5 and 0.7 which indicates an imperfect approximation however still useful."
-            )
-            logger.info("Consider increasing ftol, gtol, maxcor or num_paths.")
-        elif pareto_k >= 0.7:
-            logger.info(
-                f"Pareto k value ({pareto_k:.2f}) exceeds 0.7 which indicates a bad approximation."
-            )
-            logger.info(
-                "Consider increasing ftol, gtol, maxcor, num_paths or reparametrising the model."
-            )
-        else:
-            logger.info(
-                f"Received an invalid Pareto k value of {pareto_k:.2f} which indicates the model is seriously flawed."
-            )
-            logger.info(
-                "Consider reparametrising the model all together or ensure the input data are correct."
-            )
+    # TODO: Find replacement diagnostics for Pathfinder.
 
-        logger.warning(f"Pareto k value: {pareto_k:.2f}")
-
-    p = pt.exp(logiw - pt.logsumexp(logiw)).eval()
+    p = np.exp(logiw - logsumexp(logiw))
     rng = np.random.default_rng(random_seed)
-    return rng.choice(samples, size=num_draws, replace=replace, p=p, shuffle=False, axis=0)
+
+    try:
+        resampled = rng.choice(samples, size=num_draws, replace=replace, p=p, shuffle=False, axis=0)
+        return ImportanceSamplingResult(
+            samples=resampled, pareto_k=pareto_k, warnings=warning_msgs, method=method
+        )
+    except ValueError as e1:
+        if "Fewer non-zero entries in p than size" in str(e1):
+            num_nonzero = np.where(np.nonzero(p)[0], 1, 0).sum()
+            warning_msgs.append(
+                f"Not enough valid samples: {num_nonzero} available out of {num_draws} requested. Switching to psir importance sampling."
+            )
+            try:
+                resampled = rng.choice(
+                    samples, size=num_draws, replace=True, p=p, shuffle=False, axis=0
+                )
+                return ImportanceSamplingResult(
+                    samples=resampled, pareto_k=pareto_k, warnings=warning_msgs, method=method
+                )
+            except ValueError as e2:
+                logger.error(
+                    "Importance sampling failed even with psir importance sampling. "
+                    "This might indicate invalid probability weights or insufficient valid samples."
+                )
+                raise ValueError(
+                    "Importance sampling failed with both with and without replacement"
+                ) from e2
+        raise

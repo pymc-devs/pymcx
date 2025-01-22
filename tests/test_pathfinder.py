@@ -60,7 +60,6 @@ def test_pathfinder(inference_backend):
 
 
 def test_bfgs_sample():
-    import pytensor
     import pytensor.tensor as pt
 
     from pymc_experimental.inference.pathfinder.pathfinder import (
@@ -74,7 +73,6 @@ def test_bfgs_sample():
     L = Lp1 - 1
     J = 6
     num_samples = 1000
-    rng = pytensor.shared(np.random.default_rng(42), name="rng")
 
     # mock data
     x_data = np.random.randn(Lp1, N)
@@ -92,7 +90,6 @@ def test_bfgs_sample():
 
     # sample
     phi, logq = bfgs_sample(
-        rng=rng,
         num_samples=num_samples,
         x=x,
         g=g,
