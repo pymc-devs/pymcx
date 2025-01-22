@@ -8,7 +8,7 @@
 #     pass
 # import numpy as np
 #
-# import pymc_experimental as pmx
+# import pymc_extras as pmx
 #
 #
 # def test_match_gpytorch_linearcg_output():

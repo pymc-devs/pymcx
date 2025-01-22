@@ -27,4 +27,4 @@ repos:
   hooks:
     - id: no-print-statements
       exclude: _version.py
-      files: ^pymc_experimental/
+      files: ^pymc_extras/

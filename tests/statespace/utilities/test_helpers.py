@@ -7,8 +7,8 @@ import statsmodels.api as sm
 from numpy.testing import assert_allclose
 from pymc import modelcontext
 
-from pymc_experimental.statespace.filters.kalman_smoother import KalmanSmoother
-from pymc_experimental.statespace.utils.constants import (
+from pymc_extras.statespace.filters.kalman_smoother import KalmanSmoother
+from pymc_extras.statespace.utils.constants import (
     MATRIX_NAMES,
     SHORT_NAME_TO_LONG,
 )

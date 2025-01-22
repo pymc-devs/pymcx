@@ -19,7 +19,7 @@ import pytest
 
 from pytensor.sparse import SparseTensorType
 
-import pymc_experimental as pmx
+import pymc_extras as pmx
 
 
 @pytest.mark.parametrize("dtype", [np.float32, np.float64])

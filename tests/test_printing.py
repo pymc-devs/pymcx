@@ -3,7 +3,7 @@ import pymc as pm
 
 from rich.console import Console
 
-from pymc_experimental.printing import model_table
+from pymc_extras.printing import model_table
 
 
 def get_text(table) -> str:

@@ -23,7 +23,7 @@ from xarray.core.utils import Frozen
 jax = pytest.importorskip("jax")
 pytest.importorskip("blackjax")
 
-from pymc_experimental.inference.smc.sampling import (
+from pymc_extras.inference.smc.sampling import (
     arviz_from_particles,
     blackjax_particles_from_pymc_population,
     get_jaxified_loglikelihood,

@@ -29,18 +29,18 @@
 import os
 import sys
 
-import pymc_experimental  # isort:skip
+import pymc_extras  # isort:skip
 
 sys.path.insert(0, os.path.abspath("../"))
 
 # -- Project information -----------------------------------------------------
 
-project = "pymc_experimental"
+project = "pymc_extras"
 copyright = "2022, pymc-devs"
 author = "pymc-devs"
 
 # The short X.Y version
-version = pymc_experimental.__version__
+version = pymc_extras.__version__
 # The full version, including alpha/beta/rc tags
 release = version
 
@@ -118,7 +118,7 @@ html_theme_options = {
 }
 html_context = {
     "github_user": "pymc-devs",
-    "github_repo": "pymc-experimental",
+    "github_repo": "pymc-extras",
     "github_version": "main",
     "doc_path": "docs",
     "default_mode": "light",
@@ -133,7 +133,7 @@ html_static_path = ["../_static"]
 # -- Options for HTMLHelp output ---------------------------------------------
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = "pymc_experimentaldoc"
+htmlhelp_basename = "pymc_extrasdoc"
 
 
 # -- Options for LaTeX output ------------------------------------------------
@@ -159,9 +159,9 @@ latex_elements = {
 latex_documents = [
     (
         master_doc,
-        "pymc_experimental.tex",
-        "pymc_experimental Documentation",
-        "The developers of pymc_experimental",
+        "pymc_extras.tex",
+        "pymc_extras Documentation",
+        "The developers of pymc_extras",
         "manual",
     ),
 ]
@@ -171,7 +171,7 @@ latex_documents = [
 
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
-man_pages = [(master_doc, "pymc_experimental", "pymc_experimental Documentation", [author], 1)]
+man_pages = [(master_doc, "pymc_extras", "pymc_extras Documentation", [author], 1)]
 
 
 # -- Options for Texinfo output ----------------------------------------------
@@ -182,10 +182,10 @@ man_pages = [(master_doc, "pymc_experimental", "pymc_experimental Documentation"
 texinfo_documents = [
     (
         master_doc,
-        "pymc_experimental",
-        "pymc_experimental Documentation",
+        "pymc_extras",
+        "pymc_extras Documentation",
         author,
-        "pymc_experimental",
+        "pymc_extras",
         "One line description of project.",
         "Miscellaneous",
     ),

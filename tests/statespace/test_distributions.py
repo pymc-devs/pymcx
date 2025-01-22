@@ -7,13 +7,13 @@ import pytest
 from numpy.testing import assert_allclose
 from scipy.stats import multivariate_normal
 
-from pymc_experimental.statespace import structural
-from pymc_experimental.statespace.filters.distributions import (
+from pymc_extras.statespace import structural
+from pymc_extras.statespace.filters.distributions import (
     LinearGaussianStateSpace,
     SequenceMvNormal,
     _LinearGaussianStateSpace,
 )
-from pymc_experimental.statespace.utils.constants import (
+from pymc_extras.statespace.utils.constants import (
     ALL_STATE_DIM,
     OBS_STATE_DIM,
     TIME_DIM,

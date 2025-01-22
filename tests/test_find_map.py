@@ -3,7 +3,7 @@ import pymc as pm
 import pytensor.tensor as pt
 import pytest
 
-from pymc_experimental.inference.find_map import (
+from pymc_extras.inference.find_map import (
     GradientBackend,
     find_MAP,
     scipy_optimize_funcs_from_loss,

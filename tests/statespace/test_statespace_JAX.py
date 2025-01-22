@@ -8,7 +8,7 @@ import pytest
 
 from pymc.model.transform.optimization import freeze_dims_and_data
 
-from pymc_experimental.statespace.utils.constants import (
+from pymc_extras.statespace.utils.constants import (
     FILTER_OUTPUT_NAMES,
     MATRIX_NAMES,
     SMOOTHER_OUTPUT_NAMES,

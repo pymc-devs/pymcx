@@ -20,11 +20,11 @@ from os.path import dirname, join, realpath
 
 from setuptools import find_packages, setup
 
-DISTNAME = "pymc-experimental"
+DISTNAME = "pymc-extras"
 DESCRIPTION = "A home for new additions to PyMC, which may include unusual probability distribitions, advanced model fitting algorithms, or any code that may be inappropriate to include in the pymc repository, but may want to be made available to users."
 AUTHOR = "PyMC Developers"
 AUTHOR_EMAIL = "pymc.devs@gmail.com"
-URL = "http://github.com/pymc-devs/pymc-experimental"
+URL = "http://github.com/pymc-devs/pymc-extras"
 LICENSE = "Apache License, Version 2.0"
 
 classifiers = [
@@ -68,14 +68,14 @@ extras_require["dev"] = dev_install_reqs
 
 def read_version():
     here = os.path.abspath(os.path.dirname(__file__))
-    with open(os.path.join(here, "pymc_experimental", "version.txt")) as f:
+    with open(os.path.join(here, "pymc_extras", "version.txt")) as f:
         version = f.read().strip()
     return version
 
 
 if __name__ == "__main__":
     setup(
-        name="pymc-experimental",
+        name="pymc-extras",
         version=read_version(),
         maintainer=AUTHOR,
         maintainer_email=AUTHOR_EMAIL,

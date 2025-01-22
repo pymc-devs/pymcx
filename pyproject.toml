@@ -4,7 +4,7 @@ xfail_strict = true
 addopts = [
   "-v",
   "--doctest-modules",
-  "--ignore=pymc_experimental/model_builder.py"
+  "--ignore=pymc_extras/model_builder.py"
 ]
 
 filterwarnings =[
@@ -77,4 +77,4 @@ lines-between-types = 1
   'F401', # Unused import warning for test files -- this check removes imports of fixtures
   'F811'  # Redefine while unused -- this check fails on imported fixtures
 ]
-'pymc_experimental/__init__.py' = ['F401', 'F403']
+'pymc_extras/__init__.py' = ['F401', 'F403']

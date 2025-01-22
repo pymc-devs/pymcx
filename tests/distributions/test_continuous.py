@@ -34,7 +34,7 @@ from pymc.testing import (
 )
 
 # the distributions to be tested
-from pymc_experimental.distributions import Chi, GenExtreme, Maxwell
+from pymc_extras.distributions import Chi, GenExtreme, Maxwell
 
 
 class TestGenExtremeClass:

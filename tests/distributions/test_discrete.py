@@ -30,7 +30,7 @@ from pymc.testing import (
 )
 from pytensor import config
 
-from pymc_experimental.distributions import (
+from pymc_extras.distributions import (
     BetaNegativeBinomial,
     GeneralizedPoisson,
     Skellam,

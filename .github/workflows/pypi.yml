@@ -28,18 +28,18 @@ jobs:
             cd test-sdist
             python -m venv venv-sdist
             venv-sdist/bin/python -m pip install numpy
-            venv-sdist/bin/python -m pip install ../dist/pymc_experimental*.tar.gz
+            venv-sdist/bin/python -m pip install ../dist/pymc_extras*.tar.gz
             echo "Checking import and version number (on release)"
-            venv-sdist/bin/python -c "import pymc_experimental as pmx; assert pmx.__version__ == '${{ github.ref_name }}'[1:] if '${{ github.ref_type }}' == 'tag' else True; print(pmx.__version__)"
+            venv-sdist/bin/python -c "import pymc_extras as pmx; assert pmx.__version__ == '${{ github.ref_name }}'[1:] if '${{ github.ref_type }}' == 'tag' else True; print(pmx.__version__)"
             cd ..
       - name: Check the bdist installs and imports
         run: |
               mkdir -p test-bdist
               cd test-bdist
               python -m venv venv-bdist
-              venv-bdist/bin/python -m pip install ../dist/pymc_experimental*.whl
+              venv-bdist/bin/python -m pip install ../dist/pymc_extras*.whl
               echo "Checking import and version number (on release)"
-              venv-bdist/bin/python -c "import pymc_experimental as pmx; assert pmx.__version__ == '${{ github.ref_name }}'[1:] if '${{ github.ref_type }}' == 'tag' else pmx.__version__; print(pmx.__version__)"
+              venv-bdist/bin/python -c "import pymc_extras as pmx; assert pmx.__version__ == '${{ github.ref_name }}'[1:] if '${{ github.ref_type }}' == 'tag' else pmx.__version__; print(pmx.__version__)"
               cd ..
       - uses: actions/upload-artifact@v3
         with:
@@ -50,13 +50,16 @@ jobs:
     name: upload release to PyPI
     needs: [build]
     runs-on: ubuntu-latest
-    if: github.event_name == 'release' && github.event.action == 'published'
+    if: github.repository_owner == 'pymc-devs' && github.event_name == 'release' && github.event.action == 'published'
+    # Use the `release` GitHub environment to protect the Trusted Publishing (OIDC)
+    # workflow by requiring signoff from a maintainer.
+    environment: release
+    permissions:
+      # write id-token is necessary for trusted publishing (OIDC)
+      id-token: write
     steps:
       - uses: actions/download-artifact@v3
         with:
           name: artifact
           path: dist
       - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          user: __token__
-          password: ${{ secrets.PYPI_API_TOKEN }}

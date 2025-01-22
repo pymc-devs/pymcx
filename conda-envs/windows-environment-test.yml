@@ -1,4 +1,4 @@
-name: pymc-experimental-test
+name: pymc-extras-test
 channels:
 - conda-forge
 - defaults
@@ -10,7 +10,7 @@ dependencies:
 - xhistogram
 - statsmodels
 - pip:
-  - pymc>=5.17.0  # CI was failing to resolve
+  - pymc>=5.19.1  # CI was failing to resolve
   - blackjax
   - scikit-learn
   - better_optimize>=0.0.10

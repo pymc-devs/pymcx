@@ -6,7 +6,7 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/*"
-      - "pymc_experimental/**"
+      - "pymc_extras/**"
       - "tests/**"
       - "setup.py"
       - "pyproject.toml"
@@ -37,16 +37,16 @@ jobs:
           environment-file: conda-envs/environment-test.yml
           create-args: >-
             python=${{matrix.python-version}}
-          environment-name: pymc-experimental-test
+          environment-name: pymc-extras-test
           init-shell: bash
           cache-environment: true
-      - name: Install pymc-experimental
+      - name: Install pymc-extras
         run: |
           pip install -e .
           python --version
       - name: Run tests
         run: |
-          python -m pytest -vv --cov=pymc_experimental --cov-append --cov-report=xml --cov-report term --durations=50 $TEST_SUBSET
+          python -m pytest -vv --cov=pymc_extras --cov-append --cov-report=xml --cov-report term --durations=50 $TEST_SUBSET
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v2
         with:
@@ -76,10 +76,10 @@ jobs:
           micromamba-version: "1.5.10-0"  # Until https://github.com/mamba-org/mamba/issues/3467 is not fixed
           create-args: >-
             python=${{matrix.python-version}}
-          environment-name: pymc-experimental-test
+          environment-name: pymc-extras-test
           init-shell: cmd.exe
           cache-environment: true
-      - name: Install pymc-experimental
+      - name: Install pymc-extras
         run: |
           pip install -e .
           python --version
@@ -87,7 +87,7 @@ jobs:
         # This job uses a cmd shell, therefore the environment variable syntax is different!
         # The ">-" in the next line replaces newlines with spaces (see https://stackoverflow.com/a/66809682).
         run: >-
-          python -m pytest -vv --cov=pymc_experimental --cov-append --cov-report=xml --cov-report term --durations=50 %TEST_SUBSET%
+          python -m pytest -vv --cov=pymc_extras --cov-append --cov-report=xml --cov-report term --durations=50 %TEST_SUBSET%
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v2
         with:

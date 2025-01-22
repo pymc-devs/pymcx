@@ -17,10 +17,10 @@ import numpy as np
 import pymc as pm
 import pytest
 
-import pymc_experimental as pmx
+import pymc_extras as pmx
 
-from pymc_experimental.inference.find_map import find_MAP
-from pymc_experimental.inference.laplace import (
+from pymc_extras.inference.find_map import find_MAP
+from pymc_extras.inference.laplace import (
     fit_laplace,
     fit_mvn_to_MAP,
     sample_laplace_posterior,

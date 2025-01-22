@@ -10,7 +10,7 @@ from pymc.distributions.shape_utils import change_dist_size
 from pymc.logprob.utils import ParameterValueError
 from pymc.sampling.mcmc import assign_step_methods
 
-from pymc_experimental.distributions.timeseries import (
+from pymc_extras.distributions.timeseries import (
     DiscreteMarkovChain,
     DiscreteMarkovChainGibbsMetropolis,
 )
@@ -225,7 +225,7 @@ class TestDiscreteMarkovRV:
     def test_mcmc_sampling(self):
         with pm.Model(coords={"step": range(100)}) as model:
             init_dist = Categorical.dist(p=[0.5, 0.5])
-            DiscreteMarkovChain(
+            markov_chain = DiscreteMarkovChain(
                 "markov_chain",
                 P=[[0.1, 0.9], [0.1, 0.9]],
                 init_dist=init_dist,
@@ -233,8 +233,10 @@ class TestDiscreteMarkovRV:
                 dims="step",
             )
 
-            step_method = assign_step_methods(model)
-            assert isinstance(step_method, DiscreteMarkovChainGibbsMetropolis)
+            _, assigned_step_methods = assign_step_methods(model)
+            assert assigned_step_methods[DiscreteMarkovChainGibbsMetropolis] == [
+                model.rvs_to_values[markov_chain]
+            ]
 
             # Sampler needs no tuning
             idata = pm.sample(

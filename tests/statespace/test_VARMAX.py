@@ -10,8 +10,8 @@ import statsmodels.api as sm
 
 from numpy.testing import assert_allclose, assert_array_less
 
-from pymc_experimental.statespace import BayesianVARMAX
-from pymc_experimental.statespace.utils.constants import SHORT_NAME_TO_LONG
+from pymc_extras.statespace import BayesianVARMAX
+from pymc_extras.statespace.utils.constants import SHORT_NAME_TO_LONG
 from tests.statespace.utilities.shared_fixtures import (  # pylint: disable=unused-import
     rng,
 )

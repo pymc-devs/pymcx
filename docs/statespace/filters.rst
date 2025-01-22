@@ -2,14 +2,12 @@
 Kalman Filters
 ********************
 
-.. automodule:: pymc_experimental.statespace.filters
+.. automodule:: pymc_extras.statespace.filters
 .. autosummary::
    :toctree: generated
 
     StandardFilter
     UnivariateFilter
-    SteadyStateFilter
     KalmanSmoother
-    SingleTimeseriesFilter
-    CholeskyFilter
+    SquareRootFilter
     LinearGaussianStateSpace

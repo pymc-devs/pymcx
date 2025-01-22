@@ -5,13 +5,13 @@ import pytest
 
 from numpy.testing import assert_allclose, assert_array_less
 
-from pymc_experimental.statespace.filters import (
+from pymc_extras.statespace.filters import (
     KalmanSmoother,
     SquareRootFilter,
     StandardFilter,
     UnivariateFilter,
 )
-from pymc_experimental.statespace.filters.kalman_filter import BaseFilter
+from pymc_extras.statespace.filters.kalman_filter import BaseFilter
 from tests.statespace.utilities.shared_fixtures import (  # pylint: disable=unused-import
     rng,
 )

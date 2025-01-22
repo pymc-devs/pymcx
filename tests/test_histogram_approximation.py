@@ -17,7 +17,7 @@ import numpy as np
 import pymc as pm
 import pytest
 
-import pymc_experimental as pmx
+import pymc_extras as pmx
 
 
 @pytest.mark.parametrize("use_dask", [True, False], ids="dask={}".format)

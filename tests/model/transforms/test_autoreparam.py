@@ -2,7 +2,7 @@ import numpy as np
 import pymc as pm
 import pytest
 
-from pymc_experimental.model.transforms.autoreparam import vip_reparametrize
+from pymc_extras.model.transforms.autoreparam import vip_reparametrize
 
 
 @pytest.fixture

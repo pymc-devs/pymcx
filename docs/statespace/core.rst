@@ -2,7 +2,7 @@
 Statespace Core
 ********************
 
-.. automodule:: pymc_experimental.statespace.core
+.. automodule:: pymc_extras.statespace.core
 .. autosummary::
    :toctree: generated
 

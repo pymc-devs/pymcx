@@ -3,7 +3,7 @@ import pymc as pm
 import pytensor
 import pytest
 
-import pymc_experimental as pmx
+import pymc_extras as pmx
 
 
 class TestR2D2M2CP:

@@ -18,7 +18,7 @@ import numpy as np
 import pymc as pm
 import pytest
 
-import pymc_experimental as pmx
+import pymc_extras as pmx
 
 
 def eight_schools_model():

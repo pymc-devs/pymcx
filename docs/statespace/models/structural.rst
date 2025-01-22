@@ -2,7 +2,7 @@
 Structural Components
 *********************
 
-.. automodule:: pymc_experimental.statespace.models.structural
+.. automodule:: pymc_extras.statespace.models.structural
 .. autosummary::
    :toctree: generated
 

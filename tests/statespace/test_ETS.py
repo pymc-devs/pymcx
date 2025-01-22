@@ -7,8 +7,8 @@ from numpy.testing import assert_allclose
 from pytensor.graph.basic import explicit_graph_inputs
 from scipy import linalg
 
-from pymc_experimental.statespace.models.ETS import BayesianETS
-from pymc_experimental.statespace.utils.constants import LONG_MATRIX_NAMES
+from pymc_extras.statespace.models.ETS import BayesianETS
+from pymc_extras.statespace.utils.constants import LONG_MATRIX_NAMES
 from tests.statespace.utilities.shared_fixtures import rng
 from tests.statespace.utilities.test_helpers import load_nile_test_data
 

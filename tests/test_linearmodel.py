@@ -22,7 +22,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from pymc_experimental.linearmodel import LinearModel
+from pymc_extras.linearmodel import LinearModel
 
 try:
     from sklearn import set_config

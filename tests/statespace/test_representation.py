@@ -6,7 +6,7 @@ import pytensor.tensor as pt
 
 from numpy.testing import assert_allclose
 
-from pymc_experimental.statespace.core.representation import PytensorRepresentation
+from pymc_extras.statespace.core.representation import PytensorRepresentation
 from tests.statespace.utilities.shared_fixtures import TEST_SEED
 from tests.statespace.utilities.test_helpers import fast_eval, make_test_inputs
 

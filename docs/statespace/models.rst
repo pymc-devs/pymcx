@@ -2,7 +2,7 @@
 Statespace Models
 *****************
 
-.. automodule:: pymc_experimental.statespace.models
+.. automodule:: pymc_extras.statespace.models
 .. autosummary::
    :toctree: generated
 
@@ -13,7 +13,7 @@ Statespace Models
 Structural Components
 *********************
 
-.. currentmodule:: pymc_experimental.statespace.models
+.. currentmodule:: pymc_extras.statespace.models
 .. toctree::
    :maxdepth: 2
 

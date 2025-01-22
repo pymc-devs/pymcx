@@ -22,7 +22,7 @@ import pandas as pd
 import pymc as pm
 import pytest
 
-from pymc_experimental.model_builder import ModelBuilder
+from pymc_extras.model_builder import ModelBuilder
 
 
 @pytest.fixture(scope="module")

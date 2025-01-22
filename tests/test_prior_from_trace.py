@@ -20,7 +20,7 @@ import pytest
 
 from pymc.distributions import transforms
 
-import pymc_experimental as pmx
+import pymc_extras as pmx
 
 
 @pytest.mark.parametrize(
