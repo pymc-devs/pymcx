@@ -62,10 +62,10 @@ from rich.padding import Padding
 from rich.table import Table
 from rich.text import Text
 
-from pymc_experimental.inference.pathfinder.importance_sampling import (
+from pymc_extras.inference.pathfinder.importance_sampling import (
     importance_sampling as _importance_sampling,
 )
-from pymc_experimental.inference.pathfinder.lbfgs import (
+from pymc_extras.inference.pathfinder.lbfgs import (
     LBFGS,
     LBFGSException,
     LBFGSInitFailed,

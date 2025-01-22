@@ -62,7 +62,7 @@ def test_pathfinder(inference_backend):
 def test_bfgs_sample():
     import pytensor.tensor as pt
 
-    from pymc_experimental.inference.pathfinder.pathfinder import (
+    from pymc_extras.inference.pathfinder.pathfinder import (
         alpha_recover,
         bfgs_sample,
         inverse_hessian_factors,
