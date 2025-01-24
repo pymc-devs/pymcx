@@ -1,5 +1,5 @@
 import logging
-import warnings
+import warnings as _warnings
 
 from dataclasses import dataclass, field
 from typing import Literal
@@ -30,7 +30,7 @@ def importance_sampling(
     num_draws: int,
     method: Literal["psis", "psir", "identity", "none"] | None,
     random_seed: int | None = None,
-):
+) -> ImportanceSamplingResult:
     """Pareto Smoothed Importance Resampling (PSIR)
     This implements the Pareto Smooth Importance Resampling (PSIR) method, as described in Algorithm 5 of Zhang et al. (2022). The PSIR follows a similar approach to Algorithm 1 PSIS diagnostic from Yao et al., (2018). However, before computing the the importance ratio r_s, the logP and logQ are adjusted to account for the number multiple estimators (or paths). The process involves resampling from the original sample with replacement, with probabilities proportional to the computed importance weights from PSIS.
 
@@ -50,8 +50,8 @@ def importance_sampling(
 
     Returns
     -------
-    NDArray
-        importance sampled draws
+    ImportanceSamplingResult
+        importance sampled draws and other info based on the specified method
 
     Future work!
     ----------
@@ -68,14 +68,14 @@ def importance_sampling(
     Zhang, L., Carpenter, B., Gelman, A., & Vehtari, A. (2022). Pathfinder: Parallel quasi-Newton variational inference. Journal of Machine Learning Research, 23(306), 1-49.
     """
 
-    warning_msgs = []
+    warnings = []
     num_paths, _, N = samples.shape
 
     if method == "none":
-        warning_msgs.append(
+        warnings.append(
             "Importance sampling is disabled. The samples are returned as is which may include samples from failed paths with non-finite logP or logQ values. It is recommended to use importance_sampling='psis' for better stability."
         )
-        return ImportanceSamplingResult(samples=samples, warnings=warning_msgs)
+        return ImportanceSamplingResult(samples=samples, warnings=warnings)
     else:
         samples = samples.reshape(-1, N)
         logP = logP.ravel()
@@ -87,8 +87,8 @@ def importance_sampling(
         logQ -= log_I
         logiw = logP - logQ
 
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
+        with _warnings.catch_warnings():
+            _warnings.filterwarnings(
                 "ignore", category=RuntimeWarning, message="overflow encountered in exp"
             )
             if method == "psis":
@@ -113,12 +113,12 @@ def importance_sampling(
     try:
         resampled = rng.choice(samples, size=num_draws, replace=replace, p=p, shuffle=False, axis=0)
         return ImportanceSamplingResult(
-            samples=resampled, pareto_k=pareto_k, warnings=warning_msgs, method=method
+            samples=resampled, pareto_k=pareto_k, warnings=warnings, method=method
         )
     except ValueError as e1:
         if "Fewer non-zero entries in p than size" in str(e1):
             num_nonzero = np.where(np.nonzero(p)[0], 1, 0).sum()
-            warning_msgs.append(
+            warnings.append(
                 f"Not enough valid samples: {num_nonzero} available out of {num_draws} requested. Switching to psir importance sampling."
             )
             try:
@@ -126,7 +126,7 @@ def importance_sampling(
                     samples, size=num_draws, replace=True, p=p, shuffle=False, axis=0
                 )
                 return ImportanceSamplingResult(
-                    samples=resampled, pareto_k=pareto_k, warnings=warning_msgs, method=method
+                    samples=resampled, pareto_k=pareto_k, warnings=warnings, method=method
                 )
             except ValueError as e2:
                 logger.error(
@@ -134,6 +134,6 @@ def importance_sampling(
                     "This might indicate invalid probability weights or insufficient valid samples."
                 )
                 raise ValueError(
-                    "Importance sampling failed with both with and without replacement"
+                    "Importance sampling failed for both with and without replacement"
                 ) from e2
         raise

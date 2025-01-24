@@ -18,10 +18,12 @@ import numpy as np
 import pymc as pm
 import pytest
 
+pytestmark = pytest.mark.filterwarnings("ignore:compile_pymc was renamed to compile:FutureWarning")
+
 import pymc_extras as pmx
 
 
-def eight_schools_model():
+def eight_schools_model() -> pm.Model:
     J = 8
     y = np.array([28.0, 8.0, -3.0, 7.0, -1.0, 1.0, 18.0, 12.0])
     sigma = np.array([15.0, 10.0, 16.0, 11.0, 9.0, 11.0, 10.0, 18.0])
@@ -36,11 +38,8 @@ def eight_schools_model():
     return model
 
 
-@pytest.mark.parametrize("inference_backend", ["pymc", "blackjax"])
-def test_pathfinder(inference_backend):
-    if inference_backend == "blackjax" and sys.platform == "win32":
-        pytest.skip("JAX not supported on windows")
-
+@pytest.fixture
+def reference_idata():
     model = eight_schools_model()
     with model:
         idata = pmx.fit(
@@ -48,15 +47,84 @@ def test_pathfinder(inference_backend):
             num_paths=50,
             jitter=10.0,
             random_seed=41,
-            inference_backend=inference_backend,
+            inference_backend="pymc",
         )
+    return idata
+
+
+@pytest.mark.parametrize("inference_backend", ["pymc", "blackjax"])
+def test_pathfinder(inference_backend, reference_idata):
+    if inference_backend == "blackjax" and sys.platform == "win32":
+        pytest.skip("JAX not supported on windows")
+
+    if inference_backend == "blackjax":
+        model = eight_schools_model()
+        with model:
+            idata = pmx.fit(
+                method="pathfinder",
+                num_paths=50,
+                jitter=10.0,
+                random_seed=41,
+                inference_backend=inference_backend,
+            )
+    else:
+        idata = reference_idata
+        np.testing.assert_allclose(idata.posterior["mu"].mean(), 5.0, atol=1.6)
+        np.testing.assert_allclose(idata.posterior["tau"].mean(), 4.15, atol=1.5)
 
     assert idata.posterior["mu"].shape == (1, 1000)
     assert idata.posterior["tau"].shape == (1, 1000)
     assert idata.posterior["theta"].shape == (1, 1000, 8)
-    if inference_backend == "pymc":
-        np.testing.assert_allclose(idata.posterior["mu"].mean(), 5.0, atol=1.6)
-        np.testing.assert_allclose(idata.posterior["tau"].mean(), 4.15, atol=1.5)
+
+
+@pytest.mark.parametrize("concurrent", ["thread", "process"])
+def test_concurrent_results(reference_idata, concurrent):
+    model = eight_schools_model()
+    with model:
+        idata_conc = pmx.fit(
+            method="pathfinder",
+            num_paths=50,
+            jitter=10.0,
+            random_seed=41,
+            inference_backend="pymc",
+            concurrent=concurrent,
+        )
+
+    np.testing.assert_allclose(
+        reference_idata.posterior.mu.data.mean(),
+        idata_conc.posterior.mu.data.mean(),
+        atol=0.4,
+    )
+
+    np.testing.assert_allclose(
+        reference_idata.posterior.tau.data.mean(),
+        idata_conc.posterior.tau.data.mean(),
+        atol=0.2,
+    )
+
+
+def test_seed(reference_idata):
+    model = eight_schools_model()
+    with model:
+        idata_41 = pmx.fit(
+            method="pathfinder",
+            num_paths=50,
+            jitter=10.0,
+            random_seed=41,
+            inference_backend="pymc",
+        )
+
+        idata_123 = pmx.fit(
+            method="pathfinder",
+            num_paths=50,
+            jitter=10.0,
+            random_seed=123,
+            inference_backend="pymc",
+        )
+
+    assert not np.allclose(idata_41.posterior.mu.data.mean(), idata_123.posterior.mu.data.mean())
+
+    assert np.allclose(idata_41.posterior.mu.data.mean(), idata_41.posterior.mu.data.mean())
 
 
 def test_bfgs_sample():

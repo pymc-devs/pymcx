@@ -15,13 +15,14 @@
 import collections
 import logging
 import time
+import warnings as _warnings
 
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field, replace
 from enum import Enum, auto
 from importlib.util import find_spec
-from typing import Literal
+from typing import Literal, Self, TypeAlias
 
 import arviz as az
 import blackjax
@@ -41,7 +42,7 @@ from pymc.initial_point import make_initial_point_fn
 from pymc.model import modelcontext
 from pymc.model.core import Point
 from pymc.pytensorf import (
-    compile,
+    compile_pymc,
     find_rng_nodes,
     reseed_rngs,
 )
@@ -73,9 +74,14 @@ from pymc_extras.inference.pathfinder.lbfgs import (
 )
 
 logger = logging.getLogger(__name__)
+_warnings.filterwarnings(
+    "ignore", category=FutureWarning, message="compile_pymc was renamed to compile"
+)
 
 REGULARISATION_TERM = 1e-8
 DEFAULT_LINKER = "cvm_nogc"
+
+SinglePathfinderFn: TypeAlias = Callable[[int], "PathfinderResult"]
 
 
 def get_jaxified_logp_of_ravel_inputs(model: Model, jacobian: bool = True) -> Callable:
@@ -134,7 +140,7 @@ def get_logp_dlogp_of_ravel_inputs(
         [model.logp(jacobian=jacobian), model.dlogp(jacobian=jacobian)],
         model.value_vars,
     )
-    logp_dlogp_fn = compile([inputs], (logP, dlogP), **compile_kwargs)
+    logp_dlogp_fn = compile_pymc([inputs], (logP, dlogP), **compile_kwargs)
     logp_dlogp_fn.trust_input = True
 
     return logp_dlogp_fn
@@ -147,7 +153,7 @@ def convert_flat_trace_to_idata(
     inference_backend: Literal["pymc", "blackjax"] = "pymc",
     model: Model | None = None,
     importance_sampling: Literal["psis", "psir", "identity", "none"] = "psis",
-):
+) -> az.InferenceData:
     """convert flattened samples to arviz InferenceData format.
 
     Parameters
@@ -218,8 +224,6 @@ def convert_flat_trace_to_idata(
         result = jax.vmap(jax.vmap(jax_fn))(
             *jax.device_put(list(trace.values()), jax.devices(postprocessing_backend)[0])
         )
-    else:
-        raise ValueError(f"Invalid inference_backend: {inference_backend}")
 
     trace = {v.name: r for v, r in zip(vars_to_sample, result)}
     coords, dims = coords_and_dims_for_inferencedata(model)
@@ -228,7 +232,9 @@ def convert_flat_trace_to_idata(
     return idata
 
 
-def alpha_recover(x, g, epsilon):
+def alpha_recover(
+    x: TensorVariable, g: TensorVariable, epsilon: TensorVariable
+) -> tuple[TensorVariable, TensorVariable, TensorVariable, TensorVariable]:
     """compute the diagonal elements of the inverse Hessian at each iterations of L-BFGS and filter updates.
 
     Parameters
@@ -257,7 +263,7 @@ def alpha_recover(x, g, epsilon):
     shapes: L=batch_size, N=num_params
     """
 
-    def compute_alpha_l(alpha_lm1, s_l, z_l):
+    def compute_alpha_l(alpha_lm1, s_l, z_l) -> TensorVariable:
         # alpha_lm1: (N,)
         # s_l: (N,)
         # z_l: (N,)
@@ -271,10 +277,10 @@ def alpha_recover(x, g, epsilon):
         )  # fmt:off
         return 1.0 / inv_alpha_l
 
-    def return_alpha_lm1(alpha_lm1, s_l, z_l):
+    def return_alpha_lm1(alpha_lm1, s_l, z_l) -> TensorVariable:
         return alpha_lm1[-1]
 
-    def scan_body(update_mask_l, s_l, z_l, alpha_lm1):
+    def scan_body(update_mask_l, s_l, z_l, alpha_lm1) -> TensorVariable:
         return pt.switch(
             update_mask_l,
             compute_alpha_l(alpha_lm1, s_l, z_l),
@@ -309,7 +315,7 @@ def inverse_hessian_factors(
     z: TensorVariable,
     update_mask: TensorVariable,
     J: TensorConstant,
-):
+) -> tuple[TensorVariable, TensorVariable]:
     """compute the inverse hessian factors for the BFGS approximation.
 
     Parameters
@@ -322,7 +328,7 @@ def inverse_hessian_factors(
         gradient differences, shape (L, N)
     update_mask : TensorVariable
         mask for filtering updates, shape (L,)
-    J : int
+    J : TensorConstant
         history size for L-BFGS
 
     Returns
@@ -340,18 +346,20 @@ def inverse_hessian_factors(
     # NOTE: get_chi_matrix_1 is a modified version of get_chi_matrix_2 to closely follow Zhang et al., (2022)
     # NOTE: get_chi_matrix_2 is from blackjax which MAYBE incorrectly implemented
 
-    def get_chi_matrix_1(diff, update_mask, J):
+    def get_chi_matrix_1(
+        diff: TensorVariable, update_mask: TensorVariable, J: TensorConstant
+    ) -> TensorVariable:
         L, N = diff.shape
         j_last = pt.as_tensor(J - 1)  # since indexing starts at 0
 
-        def chi_update(chi_lm1, diff_l):
+        def chi_update(chi_lm1, diff_l) -> TensorVariable:
             chi_l = pt.roll(chi_lm1, -1, axis=0)
             return pt.set_subtensor(chi_l[j_last], diff_l)
 
-        def no_op(chi_lm1, diff_l):
+        def no_op(chi_lm1, diff_l) -> TensorVariable:
             return chi_lm1
 
-        def scan_body(update_mask_l, diff_l, chi_lm1):
+        def scan_body(update_mask_l, diff_l, chi_lm1) -> TensorVariable:
             return pt.switch(update_mask_l, chi_update(chi_lm1, diff_l), no_op(chi_lm1, diff_l))
 
         chi_init = pt.zeros((J, N))
@@ -370,7 +378,9 @@ def inverse_hessian_factors(
         # (L, N, J)
         return chi_mat
 
-    def get_chi_matrix_2(diff, update_mask, J):
+    def get_chi_matrix_2(
+        diff: TensorVariable, update_mask: TensorVariable, J: TensorConstant
+    ) -> TensorVariable:
         L, N = diff.shape
 
         diff_masked = update_mask[:, None] * diff
@@ -437,7 +447,7 @@ def bfgs_sample_dense(
     inv_sqrt_alpha_diag: TensorVariable,
     sqrt_alpha_diag: TensorVariable,
     u: TensorVariable,
-):
+) -> tuple[TensorVariable, TensorVariable]:
     """sample from the BFGS approximation using dense matrix operations.
 
     Parameters
@@ -512,7 +522,7 @@ def bfgs_sample_sparse(
     inv_sqrt_alpha_diag: TensorVariable,
     sqrt_alpha_diag: TensorVariable,
     u: TensorVariable,
-):
+) -> tuple[TensorVariable, TensorVariable]:
     """sample from the BFGS approximation using sparse matrix operations.
 
     Parameters
@@ -597,7 +607,7 @@ def bfgs_sample(
     beta: TensorVariable,
     gamma: TensorVariable,
     index: TensorVariable | None = None,
-):
+) -> tuple[TensorVariable, TensorVariable]:
     """sample from the BFGS approximation using the inverse hessian factors.
 
     Parameters
@@ -623,7 +633,7 @@ def bfgs_sample(
         phi: samples from local approximations over L (L, M, N)
         logQ_phi: log density of samples of phi (L, M)
     else:
-        psi: samples from local approximations where ELBO is maximised (1, M, N)
+        psi: samples from local approximations where ELBO is maximized (1, M, N)
         logQ_psi: log density of samples of psi (1, M)
 
     Notes
@@ -732,7 +742,7 @@ class PathException(Exception):
 
     DEFAULT_MESSAGE = "Path failed."
 
-    def __init__(self, message=None, status: PathStatus = PathStatus.PATH_FAILED):
+    def __init__(self, message=None, status: PathStatus = PathStatus.PATH_FAILED) -> None:
         super().__init__(message or self.DEFAULT_MESSAGE)
         self.status = status
 
@@ -744,7 +754,7 @@ class PathInvalidLogP(PathException):
 
     DEFAULT_MESSAGE = "Path failed because all the logP values in a path are not finite."
 
-    def __init__(self, message=None):
+    def __init__(self, message=None) -> None:
         super().__init__(message or self.DEFAULT_MESSAGE, PathStatus.INVALID_LOGP)
 
 
@@ -755,7 +765,7 @@ class PathInvalidLogQ(PathException):
 
     DEFAULT_MESSAGE = "Path failed because all the logQ values in a path are not finite."
 
-    def __init__(self, message=None):
+    def __init__(self, message=None) -> None:
         super().__init__(message or self.DEFAULT_MESSAGE, PathStatus.INVALID_LOGQ)
 
 
@@ -766,7 +776,7 @@ def make_pathfinder_body(
     num_elbo_draws: int,
     epsilon: float,
     **compile_kwargs: dict,
-):
+) -> Function:
     """
     computes the inner components of the Pathfinder algorithm (post-LBFGS) using PyTensor variables and returns a compiled pytensor.function.
 
@@ -787,7 +797,7 @@ def make_pathfinder_body(
 
     Returns
     -------
-    pathfinder_body_fn : Callable
+    pathfinder_body_fn : Function
         A compiled pytensor.function that performs the inner components of the Pathfinder algorithm (post-LBFGS).
 
         pathfinder_body_fn inputs:
@@ -841,7 +851,7 @@ def make_pathfinder_body(
 
     # return psi, logP_psi, logQ_psi, elbo_argmax
 
-    pathfinder_body_fn = compile(
+    pathfinder_body_fn = compile_pymc(
         [x_full, g_full],
         [psi, logP_psi, logQ_psi, elbo_argmax],
         **compile_kwargs,
@@ -863,7 +873,7 @@ def make_single_pathfinder_fn(
     epsilon: float,
     pathfinder_kwargs: dict = {},
     compile_kwargs: dict = {},
-):
+) -> SinglePathfinderFn:
     """
     returns a seedable single-path pathfinder function, where it executes a compiled function that performs the local approximation and sampling part of the Pathfinder algorithm.
 
@@ -928,13 +938,13 @@ def make_single_pathfinder_fn(
     )
     rngs = find_rng_nodes(pathfinder_body_fn.maker.fgraph.outputs)
 
-    def single_pathfinder_fn(random_seed):
+    def single_pathfinder_fn(random_seed: int) -> PathfinderResult:
         try:
             init_seed, *bfgs_seeds = _get_seeds_per_chain(random_seed, 3)
             rng = np.random.default_rng(init_seed)
             jitter_value = rng.uniform(-jitter, jitter, size=x_base.shape)
             x0 = x_base + jitter_value
-            x, g, lbfgs_niter, lbfgs_status = lbfgs.minimise(x0)
+            x, g, lbfgs_niter, lbfgs_status = lbfgs.minimize(x0)
 
             if lbfgs_status == LBFGSStatus.INIT_FAILED:
                 raise LBFGSInitFailed()
@@ -971,13 +981,11 @@ def make_single_pathfinder_fn(
                 lbfgs_status=lbfgs_status,
                 path_status=e.status,
             )
-        except Exception as e:
-            return e
 
     return single_pathfinder_fn
 
 
-def _calculate_max_workers():
+def _calculate_max_workers() -> int:
     """
     calculate the default number of workers to use for concurrent pathfinder runs.
     """
@@ -992,7 +1000,7 @@ def _calculate_max_workers():
     return processes
 
 
-def _thread(compiled_fn: Callable, seed: int):
+def _thread(fn: SinglePathfinderFn, seed: int) -> "PathfinderResult":
     """
     execute pathfinder runs concurrently using threading.
     """
@@ -1002,11 +1010,11 @@ def _thread(compiled_fn: Callable, seed: int):
 
     with lock_ctx():
         rng = np.random.default_rng(seed)
-        result = compiled_fn(rng)
+        result = fn(rng)
     return result
 
 
-def _process(compiled_fn: Callable, seed: int):
+def _process(fn: SinglePathfinderFn, seed: int) -> "PathfinderResult | bytes":
     """
     execute pathfinder runs concurrently using multiprocessing.
     """
@@ -1015,14 +1023,14 @@ def _process(compiled_fn: Callable, seed: int):
     from pytensor.compile.compilelock import lock_ctx
 
     with lock_ctx():
-        in_out_pickled = isinstance(compiled_fn, bytes)
-        fn = cloudpickle.loads(compiled_fn)
+        in_out_pickled = isinstance(fn, bytes)
+        fn = cloudpickle.loads(fn)
         rng = np.random.default_rng(seed)
         result = fn(rng) if not in_out_pickled else cloudpickle.dumps(fn(rng))
     return result
 
 
-def _get_mp_context(mp_ctx: str | None = None):
+def _get_mp_context(mp_ctx: str | None = None) -> str | None:
     """code snippet taken from ParallelSampler in pymc/pymc/sampling/parallel.py"""
     import multiprocessing
     import platform
@@ -1043,11 +1051,11 @@ def _get_mp_context(mp_ctx: str | None = None):
 
 
 def _execute_concurrently(
-    compiled_fn: Callable,
+    fn: SinglePathfinderFn,
     seeds: list[int],
     concurrent: Literal["thread", "process"] | None,
     max_workers: int | None = None,
-):
+) -> Iterator["PathfinderResult | bytes"]:
     """
     execute pathfinder runs concurrently.
     """
@@ -1062,48 +1070,42 @@ def _execute_concurrently(
 
     executor_cls = ThreadPoolExecutor if concurrent == "thread" else ProcessPoolExecutor
 
-    fn = _thread if concurrent == "thread" else _process
+    concurrent_fn = _thread if concurrent == "thread" else _process
 
     executor_kwargs = {} if concurrent == "thread" else {"mp_context": _get_mp_context()}
 
     max_workers = max_workers or (None if concurrent == "thread" else _calculate_max_workers())
 
-    compiled_fn = compiled_fn if concurrent == "thread" else cloudpickle.dumps(compiled_fn)
+    fn = fn if concurrent == "thread" else cloudpickle.dumps(fn)
 
     with executor_cls(max_workers=max_workers, **executor_kwargs) as executor:
-        futures = [executor.submit(fn, compiled_fn, seed) for seed in seeds]
+        futures = [executor.submit(concurrent_fn, fn, seed) for seed in seeds]
         for f in as_completed(futures):
-            try:
-                yield (f.result() if concurrent == "thread" else cloudpickle.loads(f.result()))
-            except Exception as e:
-                yield e
+            yield (f.result() if concurrent == "thread" else cloudpickle.loads(f.result()))
 
 
-def _execute_serially(compiled_fn: Callable, seeds: list[int]):
+def _execute_serially(fn: SinglePathfinderFn, seeds: list[int]) -> Iterator["PathfinderResult"]:
     """
     execute pathfinder runs serially.
     """
     for seed in seeds:
-        try:
-            rng = np.random.default_rng(seed)
-            yield compiled_fn(rng)
-        except Exception as e:
-            yield e
+        rng = np.random.default_rng(seed)
+        yield fn(rng)
 
 
 def make_generator(
     concurrent: Literal["thread", "process"] | None,
-    compiled_fn: Callable,
+    fn: SinglePathfinderFn,
     seeds: list[int],
     max_workers: int | None = None,
-):
+) -> Iterator["PathfinderResult | bytes"]:
     """
     generator for executing pathfinder runs concurrently or serially.
     """
     if concurrent is not None:
-        yield from _execute_concurrently(compiled_fn, seeds, concurrent, max_workers)
+        yield from _execute_concurrently(fn, seeds, concurrent, max_workers)
     else:
-        yield from _execute_serially(compiled_fn, seeds)
+        yield from _execute_serially(fn, seeds)
 
 
 @dataclass(slots=True, frozen=True)
@@ -1196,8 +1198,10 @@ class MultiPathfinderResult:
     compile_time: float | None = None
     compute_time: float | None = None
 
+    all_paths_failed: bool = False  # raises ValueError if all paths failed
+
     @classmethod
-    def from_path_results(cls, path_results: list[PathfinderResult]):
+    def from_path_results(cls, path_results: list[PathfinderResult]) -> "MultiPathfinderResult":
         """aggregate successful pathfinder results and count the occurrences of each status in PathStatus and LBFGSStatus"""
 
         NUMERIC_ATTRIBUTES = ["samples", "logP", "logQ", "lbfgs_niter", "elbo_argmax"]
@@ -1212,29 +1216,38 @@ class MultiPathfinderResult:
             mpr.lbfgs_status[pr.lbfgs_status] += 1
             mpr.path_status[pr.path_status] += 1
 
-        if not success_results:
-            raise ValueError(
-                "All paths failed. Consider decreasing the jitter or reparameterising the model."
-            )
+        # if not success_results:
+        #     raise ValueError(
+        #         "All paths failed. Consider decreasing the jitter or reparameterizing the model."
+        #     )
 
         warnings = _get_status_warning(mpr)
-        results_arr = [np.asarray(x) for x in zip(*success_results)]
-        return cls(
-            *[np.concatenate(x) if x.ndim > 1 else x for x in results_arr],
-            lbfgs_status=mpr.lbfgs_status,
-            path_status=mpr.path_status,
-            warnings=warnings,
-        )
 
-    def with_timing(self, compile_time: float, compute_time: float):
+        if success_results:
+            results_arr = [np.asarray(x) for x in zip(*success_results)]
+            return cls(
+                *[np.concatenate(x) if x.ndim > 1 else x for x in results_arr],
+                lbfgs_status=mpr.lbfgs_status,
+                path_status=mpr.path_status,
+                warnings=warnings,
+            )
+        else:
+            return cls(
+                lbfgs_status=mpr.lbfgs_status,
+                path_status=mpr.path_status,
+                warnings=warnings,
+                all_paths_failed=True,  # raises ValueError later
+            )
+
+    def with_timing(self, compile_time: float, compute_time: float) -> Self:
         """add timing information"""
         return replace(self, compile_time=compile_time, compute_time=compute_time)
 
-    def with_pathfinder_config(self, config: PathfinderConfig):
+    def with_pathfinder_config(self, config: PathfinderConfig) -> Self:
         """add pathfinder configuration"""
         return replace(self, pathfinder_config=config)
 
-    def with_warnings(self, warnings: list[str]):
+    def with_warnings(self, warnings: list[str]) -> Self:
         """add warnings"""
         return replace(self, warnings=warnings)
 
@@ -1243,23 +1256,26 @@ class MultiPathfinderResult:
         num_draws: int,
         method: Literal["psis", "psir", "identity", "none"] | None,
         random_seed: int | None = None,
-    ):
+    ) -> Self:
         """perform importance sampling"""
-        isres = _importance_sampling(
-            samples=self.samples,
-            logP=self.logP,
-            logQ=self.logQ,
-            num_draws=num_draws,
-            method=method,
-            random_seed=random_seed,
-        )
-        return replace(
-            self,
-            samples=isres.samples,
-            importance_sampling=method,
-            warnings=[*self.warnings, *isres.warnings],
-            pareto_k=isres.pareto_k,
-        )
+        if not self.all_paths_failed:
+            isres = _importance_sampling(
+                samples=self.samples,
+                logP=self.logP,
+                logQ=self.logQ,
+                num_draws=num_draws,
+                method=method,
+                random_seed=random_seed,
+            )
+            return replace(
+                self,
+                samples=isres.samples,
+                importance_sampling=method,
+                warnings=[*self.warnings, *isres.warnings],
+                pareto_k=isres.pareto_k,
+            )
+        else:
+            return self
 
     def create_summary(self) -> Table:
         """create rich table summary of pathfinder results"""
@@ -1295,29 +1311,31 @@ class MultiPathfinderResult:
             table.add_row("ELBO draws", str(self.pathfinder_config.num_elbo_draws))
 
         # lbfgs
+        table.add_row("")
+        table.add_row("LBFGS Status:")
+        for status, count in self.lbfgs_status.items():
+            table.add_row(str(status.name), str(count))
+
         if self.lbfgs_niter is not None:
-            table.add_row("")
-            table.add_row("LBFGS Status:")
-            for status, count in self.lbfgs_status.items():
-                table.add_row(str(status.name), str(count))
             table.add_row(
                 "L-BFGS iterations",
                 f"mean {np.mean(self.lbfgs_niter):.0f} ± std {np.std(self.lbfgs_niter):.0f}",
             )
 
         # paths
+        table.add_row("")
+        table.add_row("Path Status:")
+        for status, count in self.path_status.items():
+            table.add_row(str(status.name), str(count))
+
         if self.elbo_argmax is not None:
-            table.add_row("")
-            table.add_row("Path Status:")
-            for status, count in self.path_status.items():
-                table.add_row(str(status.name), str(count))
             table.add_row(
                 "ELBO argmax",
                 f"mean {np.mean(self.elbo_argmax):.0f} ± std {np.std(self.elbo_argmax):.0f}",
             )
 
         # importance sampling section
-        if self.samples is not None:
+        if not self.all_paths_failed:
             table.add_row("")
             table.add_row("Importance Sampling:")
             table.add_row("Method", self.importance_sampling)
@@ -1362,20 +1380,20 @@ class MultiPathfinderResult:
         console.print(output)
 
 
-def _get_status_warning(mpr: MultiPathfinderResult):
+def _get_status_warning(mpr: MultiPathfinderResult) -> list[str]:
     """get list of relevant LBFGSStatus and PathStatus warnings given a MultiPathfinderResult"""
     warnings = []
 
     lbfgs_status_message = {
         LBFGSStatus.MAX_ITER_REACHED: "LBFGS maximum number of iterations reached. Consider increasing maxiter if this occurence is high relative to the number of paths.",
-        LBFGSStatus.INIT_FAILED: "LBFGS failed to initialise. Consider reparameterising the model or reducing jitter if this occurence is high relative to the number of paths.",
-        LBFGSStatus.DIVERGED: "LBFGS diverged to infinity. Consider reparameterising the model or adjusting the pathfinder arguments if this occurence is high relative to the number of paths.",
+        LBFGSStatus.INIT_FAILED: "LBFGS failed to initialise. Consider reparameterizing the model or reducing jitter if this occurence is high relative to the number of paths.",
+        LBFGSStatus.DIVERGED: "LBFGS diverged to infinity. Consider reparameterizing the model or adjusting the pathfinder arguments if this occurence is high relative to the number of paths.",
     }
 
     path_status_message = {
         PathStatus.ELBO_ARGMAX_AT_ZERO: "ELBO argmax at zero refers to the first iteration during LBFGS. A high occurrence suggests the model's default initial point + jitter is may be too close to the mean posterior and a poor exploration of the parameter space. Consider increasing jitter if this occurence is high relative to the number of paths.",
-        PathStatus.INVALID_LOGP: "Invalid logP values occur when a path's logP values are not finite. The failed path is not included in samples when importance sampling is used. Consider reparameterising the model or adjusting the pathfinder arguments if this occurence is high relative to the number of paths.",
-        PathStatus.INVALID_LOGQ: "Invalid logQ values occur when a path's logQ values are not finite. The failed path is not included in samples when importance sampling is used. Consider reparameterising the model or adjusting the pathfinder arguments if this occurence is high relative to the number of paths.",
+        PathStatus.INVALID_LOGP: "Invalid logP values occur when a path's logP values are not finite. The failed path is not included in samples when importance sampling is used. Consider reparameterizing the model or adjusting the pathfinder arguments if this occurence is high relative to the number of paths.",
+        PathStatus.INVALID_LOGQ: "Invalid logQ values occur when a path's logQ values are not finite. The failed path is not included in samples when importance sampling is used. Consider reparameterizing the model or adjusting the pathfinder arguments if this occurence is high relative to the number of paths.",
     }
 
     for lbfgs_status in mpr.lbfgs_status:
@@ -1408,7 +1426,7 @@ def multipath_pathfinder(
     random_seed: RandomSeed,
     pathfinder_kwargs: dict = {},
     compile_kwargs: dict = {},
-):
+) -> MultiPathfinderResult:
     """
     Fit the Pathfinder Variational Inference algorithm using multiple paths with PyMC/PyTensor backend.
 
@@ -1457,8 +1475,8 @@ def multipath_pathfinder(
 
     Returns
     -------
-    np.ndarray
-        The samples from the Multi-Path Pathfinder algorithm.
+    MultiPathfinderResult
+        The result containing samples and other information from the Multi-Path Pathfinder algorithm.
     """
 
     valid_importance_sampling = ["psis", "psir", "identity", "none", None]
@@ -1493,7 +1511,7 @@ def multipath_pathfinder(
     # NOTE: from limited tests, no concurrency is faster than thread, and thread is faster than process. But I suspect this also depends on the model size and maxcor setting.
     generator = make_generator(
         concurrent=concurrent,
-        compiled_fn=single_pathfinder_fn,
+        fn=single_pathfinder_fn,
         seeds=path_seeds,
     )
 
@@ -1523,8 +1541,17 @@ def multipath_pathfinder(
                             num_attempts += 1
                             time.sleep(0.5)
                             logger.warning(f"Lock timeout. Retrying... ({num_attempts}/10)")
+                except Exception as e:
+                    logger.warning("Unexpected error in a path: %s", str(e))
+                    results.append(
+                        PathfinderResult(
+                            path_status=PathStatus.PATH_FAILED,
+                            lbfgs_status=LBFGSStatus.LBFGS_FAILED,
+                        )
+                    )
                 progress.update(task, advance=1)
     except (KeyboardInterrupt, StopIteration) as e:
+        # if exception is raised here, MultiPathfinderResult will collect all the successful results and report the results. User is free to abort the process earlier and the results will still be collected and return az.InferenceData.
         if isinstance(e, StopIteration):
             logger.info(str(e))
     finally:
@@ -1541,10 +1568,23 @@ def multipath_pathfinder(
                     compute_time=compute_end - compute_start,
                 )
             )
+            # TODO: option to disable summary, save to file, etc.
             mpr.display_summary()
+            if mpr.all_paths_failed:
+                raise ValueError(
+                    "All paths failed. Consider decreasing the jitter or reparameterizing the model."
+                )
         else:
             raise ValueError(
-                "All paths failed. Consider decreasing the jitter or reparameterising the model."
+                "BUG: Failed to iterate!"
+                "Please report this issue at: "
+                "https://github.com/pymc-devs/pymc-extras/issues "
+                "with your code to reproduce the issue and the following details:\n"
+                f"pathfinder_config: \n{pathfinder_config}\n"
+                f"compile_kwargs: {compile_kwargs}\n"
+                f"pathfinder_kwargs: {pathfinder_kwargs}\n"
+                f"num_paths: {num_paths}\n"
+                f"num_draws: {num_draws}\n"
             )
 
     return mpr
@@ -1564,14 +1604,14 @@ def fit_pathfinder(
     jitter: float = 2.0,
     epsilon: float = 1e-8,
     importance_sampling: Literal["psis", "psir", "identity", "none"] = "psis",
-    progressbar: bool = False,
+    progressbar: bool = True,
     concurrent: Literal["thread", "process"] | None = None,
     random_seed: RandomSeed | None = None,
     postprocessing_backend: Literal["cpu", "gpu"] = "cpu",
     inference_backend: Literal["pymc", "blackjax"] = "pymc",
     pathfinder_kwargs: dict = {},
     compile_kwargs: dict = {},
-):
+) -> az.InferenceData:
     """
     Fit the Pathfinder Variational Inference algorithm.
 
@@ -1606,7 +1646,7 @@ def fit_pathfinder(
     importance_sampling : str, optional
         importance sampling method to use which applies sampling based on the log importance weights equal to logP - logQ. Options are "psis" (default), "psir", "identity", "none". Pareto Smoothed Importance Sampling (psis) is recommended in many cases for more stable results than Pareto Smoothed Importance Resampling (psir). identity applies the log importance weights directly without resampling. none applies no importance sampling weights and returns the samples as is of size (num_paths, num_draws_per_path, N) where N is the number of model parameters, otherwise sample size is (num_draws, N).
     progressbar : bool, optional
-        Whether to display a progress bar (default is False). Setting this to True will likely increase the computation time.
+        Whether to display a progress bar (default is True). Setting this to False will likely reduce the computation time.
     random_seed : RandomSeed, optional
         Random seed for reproducibility.
     postprocessing_backend : str, optional

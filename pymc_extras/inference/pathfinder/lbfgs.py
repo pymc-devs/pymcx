@@ -106,7 +106,7 @@ class LBFGSInitFailed(LBFGSException):
 
 
 class LBFGS:
-    """L-BFGS optimiser wrapper around scipy's implementation.
+    """L-BFGS optimizer wrapper around scipy's implementation.
 
     Parameters
     ----------
@@ -124,7 +124,9 @@ class LBFGS:
         maximum number of line search steps, defaults to 1000
     """
 
-    def __init__(self, value_grad_fn, maxcor, maxiter=1000, ftol=1e-5, gtol=1e-8, maxls=1000):
+    def __init__(
+        self, value_grad_fn, maxcor, maxiter=1000, ftol=1e-5, gtol=1e-8, maxls=1000
+    ) -> None:
         self.value_grad_fn = value_grad_fn
         self.maxcor = maxcor
         self.maxiter = maxiter
@@ -132,8 +134,8 @@ class LBFGS:
         self.gtol = gtol
         self.maxls = maxls
 
-    def minimise(self, x0):
-        """minimises objective function starting from initial position.
+    def minimize(self, x0) -> tuple[NDArray, NDArray, int, LBFGSStatus]:
+        """minimizes objective function starting from initial position.
 
         Parameters
         ----------
