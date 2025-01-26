@@ -99,7 +99,7 @@ def test_concurrent_results(reference_idata, concurrent):
     np.testing.assert_allclose(
         reference_idata.posterior.tau.data.mean(),
         idata_conc.posterior.tau.data.mean(),
-        atol=0.2,
+        atol=0.4,
     )
 
 

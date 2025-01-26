@@ -22,7 +22,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field, replace
 from enum import Enum, auto
 from importlib.util import find_spec
-from typing import Literal, Self, TypeAlias
+from typing import Literal, TypeAlias
 
 import arviz as az
 import blackjax
@@ -62,6 +62,9 @@ from rich.console import Console, Group
 from rich.padding import Padding
 from rich.table import Table
 from rich.text import Text
+
+# TODO: change to typing.Self after Python versions greater than 3.10
+from typing_extensions import Self
 
 from pymc_extras.inference.pathfinder.importance_sampling import (
     importance_sampling as _importance_sampling,
