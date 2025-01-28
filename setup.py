@@ -25,7 +25,7 @@ DESCRIPTION = "A home for new additions to PyMC, which may include unusual proba
 AUTHOR = "PyMC Developers"
 AUTHOR_EMAIL = "pymc.devs@gmail.com"
 URL = "http://github.com/pymc-devs/pymc-extras"
-LICENSE = "Apache License, Version 2.0"
+LICENSE = "Apache-2.0"
 
 classifiers = [
     "Development Status :: 5 - Production/Stable",
