@@ -19,7 +19,8 @@ from pymc.model.fgraph import (
     model_free_rv,
     model_from_fgraph,
 )
-from pymc.pytensorf import collect_default_updates, compile_pymc, constant_fold, toposort_replace
+from pymc.pytensorf import collect_default_updates, constant_fold, toposort_replace
+from pymc.pytensorf import compile as compile_pymc
 from pymc.util import RandomState, _get_seeds_per_chain
 from pytensor import In, Out
 from pytensor.compile import SharedVariable
