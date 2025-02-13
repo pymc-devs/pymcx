@@ -41,7 +41,7 @@ jobs:
               echo "Checking import and version number (on release)"
               venv-bdist/bin/python -c "import pymc_extras as pmx; assert pmx.__version__ == '${{ github.ref_name }}'[1:] if '${{ github.ref_type }}' == 'tag' else pmx.__version__; print(pmx.__version__)"
               cd ..
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: artifact
           path: dist/*
@@ -58,7 +58,7 @@ jobs:
       # write id-token is necessary for trusted publishing (OIDC)
       id-token: write
     steps:
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: artifact
           path: dist

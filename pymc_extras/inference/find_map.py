@@ -1,9 +1,9 @@
 import logging
 
 from collections.abc import Callable
+from importlib.util import find_spec
 from typing import Literal, cast, get_args
 
-import jax
 import numpy as np
 import pymc as pm
 import pytensor
@@ -30,12 +30,28 @@ VALID_BACKENDS = get_args(GradientBackend)
 def set_optimizer_function_defaults(method, use_grad, use_hess, use_hessp):
     method_info = MINIMIZE_MODE_KWARGS[method].copy()
 
-    use_grad = use_grad if use_grad is not None else method_info["uses_grad"]
-    use_hess = use_hess if use_hess is not None else method_info["uses_hess"]
-    use_hessp = use_hessp if use_hessp is not None else method_info["uses_hessp"]
-
     if use_hess and use_hessp:
+        _log.warning(
+            'Both "use_hess" and "use_hessp" are set to True, but scipy.optimize.minimize never uses both at the '
+            'same time. When possible "use_hessp" is preferred because its is computationally more efficient. '
+            'Setting "use_hess" to False.'
+        )
         use_hess = False
+
+    use_grad = use_grad if use_grad is not None else method_info["uses_grad"]
+
+    if use_hessp is not None and use_hess is None:
+        use_hess = not use_hessp
+
+    elif use_hess is not None and use_hessp is None:
+        use_hessp = not use_hess
+
+    elif use_hessp is None and use_hess is None:
+        use_hessp = method_info["uses_hessp"]
+        use_hess = method_info["uses_hess"]
+        if use_hessp and use_hess:
+            # If a method could use either hess or hessp, we default to using hessp
+            use_hess = False
 
     return use_grad, use_hess, use_hessp
 
@@ -59,7 +75,7 @@ def get_nearest_psd(A: np.ndarray) -> np.ndarray:
         The nearest positive semi-definite matrix to the input matrix.
     """
     C = (A + A.T) / 2
-    eigval, eigvec = np.linalg.eig(C)
+    eigval, eigvec = np.linalg.eigh(C)
     eigval[eigval < 0] = 0
 
     return eigvec @ np.diag(eigval) @ eigvec.T
@@ -97,7 +113,7 @@ def _create_transformed_draws(H_inv, slices, out_shapes, posterior_draws, model,
     return f_untransform(posterior_draws)
 
 
-def _compile_jax_gradients(
+def _compile_grad_and_hess_to_jax(
     f_loss: Function, use_hess: bool, use_hessp: bool
 ) -> tuple[Callable | None, Callable | None]:
     """
@@ -122,6 +138,8 @@ def _compile_jax_gradients(
     f_hessp: Callable | None
         The compiled hessian-vector product function, or None if use_hessp is False.
     """
+    import jax
+
     f_hess = None
     f_hessp = None
 
@@ -152,7 +170,7 @@ def _compile_jax_gradients(
     return f_loss_and_grad, f_hess, f_hessp
 
 
-def _compile_functions(
+def _compile_functions_for_scipy_optimize(
     loss: TensorVariable,
     inputs: list[TensorVariable],
     compute_grad: bool,
@@ -177,7 +195,7 @@ def _compile_functions(
     compute_hessp: bool
         Whether to compile a function that computes the Hessian-vector product of the loss function.
     compile_kwargs: dict, optional
-        Additional keyword arguments to pass to the ``pm.compile_pymc`` function.
+        Additional keyword arguments to pass to the ``pm.compile`` function.
 
     Returns
     -------
@@ -193,19 +211,19 @@ def _compile_functions(
     if compute_grad:
         grads = pytensor.gradient.grad(loss, inputs)
         grad = pt.concatenate([grad.ravel() for grad in grads])
-        f_loss_and_grad = pm.compile_pymc(inputs, [loss, grad], **compile_kwargs)
+        f_loss_and_grad = pm.compile(inputs, [loss, grad], **compile_kwargs)
     else:
-        f_loss = pm.compile_pymc(inputs, loss, **compile_kwargs)
+        f_loss = pm.compile(inputs, loss, **compile_kwargs)
         return [f_loss]
 
     if compute_hess:
         hess = pytensor.gradient.jacobian(grad, inputs)[0]
-        f_hess = pm.compile_pymc(inputs, hess, **compile_kwargs)
+        f_hess = pm.compile(inputs, hess, **compile_kwargs)
 
     if compute_hessp:
         p = pt.tensor("p", shape=inputs[0].type.shape)
         hessp = pytensor.gradient.hessian_vector_product(loss, inputs, p)
-        f_hessp = pm.compile_pymc([*inputs, p], hessp[0], **compile_kwargs)
+        f_hessp = pm.compile([*inputs, p], hessp[0], **compile_kwargs)
 
     return [f_loss_and_grad, f_hess, f_hessp]
 
@@ -240,7 +258,7 @@ def scipy_optimize_funcs_from_loss(
     gradient_backend: str, default "pytensor"
         Which backend to use to compute gradients. Must be one of "jax" or "pytensor"
     compile_kwargs:
-        Additional keyword arguments to pass to the ``pm.compile_pymc`` function.
+        Additional keyword arguments to pass to the ``pm.compile`` function.
 
     Returns
     -------
@@ -265,6 +283,8 @@ def scipy_optimize_funcs_from_loss(
         )
 
     use_jax_gradients = (gradient_backend == "jax") and use_grad
+    if use_jax_gradients and not find_spec("jax"):
+        raise ImportError("JAX must be installed to use JAX gradients")
 
     mode = compile_kwargs.get("mode", None)
     if mode is None and use_jax_gradients:
@@ -285,7 +305,7 @@ def scipy_optimize_funcs_from_loss(
     compute_hess = use_hess and not use_jax_gradients
     compute_hessp = use_hessp and not use_jax_gradients
 
-    funcs = _compile_functions(
+    funcs = _compile_functions_for_scipy_optimize(
         loss=loss,
         inputs=[flat_input],
         compute_grad=compute_grad,
@@ -301,7 +321,7 @@ def scipy_optimize_funcs_from_loss(
 
     if use_jax_gradients:
         # f_loss here is f_loss_and_grad; the name is unchanged to simplify the return values
-        f_loss, f_hess, f_hessp = _compile_jax_gradients(f_loss, use_hess, use_hessp)
+        f_loss, f_hess, f_hessp = _compile_grad_and_hess_to_jax(f_loss, use_hess, use_hessp)
 
     return f_loss, f_hess, f_hessp
 

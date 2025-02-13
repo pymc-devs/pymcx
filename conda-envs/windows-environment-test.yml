@@ -9,8 +9,9 @@ dependencies:
 - dask
 - xhistogram
 - statsmodels
+- numba<=0.60.0
+- pymc>=5.20
 - pip:
-  - pymc>=5.19.1  # CI was failing to resolve
   - blackjax
   - scikit-learn
-  - better_optimize>=0.0.10
+  - better_optimize

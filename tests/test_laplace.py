@@ -19,10 +19,10 @@ import pytest
 
 import pymc_extras as pmx
 
-from pymc_extras.inference.find_map import find_MAP
+from pymc_extras.inference.find_map import GradientBackend, find_MAP
 from pymc_extras.inference.laplace import (
     fit_laplace,
-    fit_mvn_to_MAP,
+    fit_mvn_at_MAP,
     sample_laplace_posterior,
 )
 
@@ -37,7 +37,11 @@ def rng():
     "ignore:hessian will stop negating the output in a future version of PyMC.\n"
     + "To suppress this warning set `negate_output=False`:FutureWarning",
 )
-def test_laplace():
+@pytest.mark.parametrize(
+    "mode, gradient_backend",
+    [(None, "pytensor"), ("NUMBA", "pytensor"), ("JAX", "jax"), ("JAX", "pytensor")],
+)
+def test_laplace(mode, gradient_backend: GradientBackend):
     # Example originates from Bayesian Data Analyses, 3rd Edition
     # By Andrew Gelman, John Carlin, Hal Stern, David Dunson,
     # Aki Vehtari, and Donald Rubin.
@@ -55,7 +59,13 @@ def test_laplace():
         vars = [mu, logsigma]
 
         idata = pmx.fit(
-            method="laplace", optimize_method="trust-ncg", draws=draws, random_seed=173300, chains=1
+            method="laplace",
+            optimize_method="trust-ncg",
+            draws=draws,
+            random_seed=173300,
+            chains=1,
+            compile_kwargs={"mode": mode},
+            gradient_backend=gradient_backend,
         )
 
     assert idata.posterior["mu"].shape == (1, draws)
@@ -71,7 +81,11 @@ def test_laplace():
     np.testing.assert_allclose(idata.fit["covariance_matrix"].values, bda_cov, atol=1e-4)
 
 
-def test_laplace_only_fit():
+@pytest.mark.parametrize(
+    "mode, gradient_backend",
+    [(None, "pytensor"), ("NUMBA", "pytensor"), ("JAX", "jax"), ("JAX", "pytensor")],
+)
+def test_laplace_only_fit(mode, gradient_backend: GradientBackend):
     # Example originates from Bayesian Data Analyses, 3rd Edition
     # By Andrew Gelman, John Carlin, Hal Stern, David Dunson,
     # Aki Vehtari, and Donald Rubin.
@@ -90,8 +104,8 @@ def test_laplace_only_fit():
             method="laplace",
             optimize_method="BFGS",
             progressbar=True,
-            gradient_backend="jax",
-            compile_kwargs={"mode": "JAX"},
+            gradient_backend=gradient_backend,
+            compile_kwargs={"mode": mode},
             optimizer_kwargs=dict(maxiter=100_000, gtol=1e-100),
             random_seed=173300,
         )
@@ -111,8 +125,11 @@ def test_laplace_only_fit():
     [True, False],
     ids=["transformed", "untransformed"],
 )
-@pytest.mark.parametrize("mode", ["JAX", None], ids=["jax", "pytensor"])
-def test_fit_laplace_coords(rng, transform_samples, mode):
+@pytest.mark.parametrize(
+    "mode, gradient_backend",
+    [(None, "pytensor"), ("NUMBA", "pytensor"), ("JAX", "jax"), ("JAX", "pytensor")],
+)
+def test_fit_laplace_coords(rng, transform_samples, mode, gradient_backend: GradientBackend):
     coords = {"city": ["A", "B", "C"], "obs_idx": np.arange(100)}
     with pm.Model(coords=coords) as model:
         mu = pm.Normal("mu", mu=3, sigma=0.5, dims=["city"])
@@ -131,13 +148,13 @@ def test_fit_laplace_coords(rng, transform_samples, mode):
             use_hessp=True,
             progressbar=False,
             compile_kwargs=dict(mode=mode),
-            gradient_backend="jax" if mode == "JAX" else "pytensor",
+            gradient_backend=gradient_backend,
         )
 
         for value in optimized_point.values():
             assert value.shape == (3,)
 
-        mu, H_inv = fit_mvn_to_MAP(
+        mu, H_inv = fit_mvn_at_MAP(
             optimized_point=optimized_point,
             model=model,
             transform_samples=transform_samples,
@@ -163,7 +180,11 @@ def test_fit_laplace_coords(rng, transform_samples, mode):
     ]
 
 
-def test_fit_laplace_ragged_coords(rng):
+@pytest.mark.parametrize(
+    "mode, gradient_backend",
+    [(None, "pytensor"), ("NUMBA", "pytensor"), ("JAX", "jax"), ("JAX", "pytensor")],
+)
+def test_fit_laplace_ragged_coords(mode, gradient_backend: GradientBackend, rng):
     coords = {"city": ["A", "B", "C"], "feature": [0, 1], "obs_idx": np.arange(100)}
     with pm.Model(coords=coords) as ragged_dim_model:
         X = pm.Data("X", np.ones((100, 2)), dims=["obs_idx", "feature"])
@@ -188,8 +209,8 @@ def test_fit_laplace_ragged_coords(rng):
             progressbar=False,
             use_grad=True,
             use_hessp=True,
-            gradient_backend="jax",
-            compile_kwargs={"mode": "JAX"},
+            gradient_backend=gradient_backend,
+            compile_kwargs={"mode": mode},
         )
 
     assert idata["posterior"].beta.shape[-2:] == (3, 2)
@@ -206,7 +227,11 @@ def test_fit_laplace_ragged_coords(rng):
     [True, False],
     ids=["transformed", "untransformed"],
 )
-def test_fit_laplace(fit_in_unconstrained_space):
+@pytest.mark.parametrize(
+    "mode, gradient_backend",
+    [(None, "pytensor"), ("NUMBA", "pytensor"), ("JAX", "jax"), ("JAX", "pytensor")],
+)
+def test_fit_laplace(fit_in_unconstrained_space, mode, gradient_backend: GradientBackend):
     with pm.Model() as simp_model:
         mu = pm.Normal("mu", mu=3, sigma=0.5)
         sigma = pm.Exponential("sigma", 1)
@@ -223,6 +248,8 @@ def test_fit_laplace(fit_in_unconstrained_space):
             use_hessp=True,
             fit_in_unconstrained_space=fit_in_unconstrained_space,
             optimizer_kwargs=dict(maxiter=100_000, tol=1e-100),
+            compile_kwargs={"mode": mode},
+            gradient_backend=gradient_backend,
         )
 
         np.testing.assert_allclose(np.mean(idata.posterior.mu, axis=1), np.full((2,), 3), atol=0.1)

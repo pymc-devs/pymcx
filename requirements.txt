@@ -1,2 +1,3 @@
-pymc>=5.19.1
+pymc>=5.20
 scikit-learn
+better-optimize
