@@ -20,7 +20,7 @@ class ImportanceSamplingResult:
     samples: NDArray
     pareto_k: float | None = None
     warnings: list[str] = field(default_factory=list)
-    method: str = "none"
+    method: str = "psis"
 
 
 def importance_sampling(
@@ -82,7 +82,7 @@ def importance_sampling(
         warnings.append(
             "Importance sampling is disabled. The samples are returned as is which may include samples from failed paths with non-finite logP or logQ values. It is recommended to use importance_sampling='psis' for better stability."
         )
-        return ImportanceSamplingResult(samples=samples, warnings=warnings)
+        return ImportanceSamplingResult(samples=samples, warnings=warnings, method=method)
     else:
         samples = samples.reshape(-1, N)
         logP = logP.ravel()

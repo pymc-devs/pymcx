@@ -1258,7 +1258,7 @@ class MultiPathfinderResult:
     def with_importance_sampling(
         self,
         num_draws: int,
-        method: Literal["psis", "psir", "identity", "none"] | None,
+        method: Literal["psis", "psir", "identity"] | None,
         random_seed: int | None = None,
     ) -> Self:
         """perform importance sampling"""
@@ -1622,7 +1622,7 @@ def fit_pathfinder(
     num_elbo_draws: int = 10,  # K
     jitter: float = 2.0,
     epsilon: float = 1e-8,
-    importance_sampling: Literal["psis", "psir", "identity", "none"] | None = "psis",
+    importance_sampling: Literal["psis", "psir", "identity"] | None = "psis",
     progressbar: bool = True,
     concurrent: Literal["thread", "process"] | None = None,
     random_seed: RandomSeed | None = None,
@@ -1670,7 +1670,7 @@ def fit_pathfinder(
         "psir" : Pareto Smoothed Importance Resampling
                 Less stable than PSIS.
         "identity" : Applies log importance weights directly without resampling.
-        None or "none" : No importance sampling weights. Returns raw samples of size (num_paths, num_draws_per_path, N) where N is number of model parameters. Other methods return samples of size (num_draws, N).
+        None : No importance sampling weights. Returns raw samples of size (num_paths, num_draws_per_path, N) where N is number of model parameters. Other methods return samples of size (num_draws, N).
     progressbar : bool, optional
         Whether to display a progress bar (default is True). Setting this to False will likely reduce the computation time.
     random_seed : RandomSeed, optional
@@ -1702,7 +1702,6 @@ def fit_pathfinder(
 
     if importance_sampling is not None:
         importance_sampling = importance_sampling.lower()
-        importance_sampling = None if importance_sampling == "none" else importance_sampling
 
     if importance_sampling not in valid_importance_sampling:
         raise ValueError(f"Invalid importance sampling method: {importance_sampling}")
