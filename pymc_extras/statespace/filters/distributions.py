@@ -62,29 +62,8 @@ class MvNormalSVD(MvNormal):
     A JAX MvNormal robust to low-rank covariance matrices
     """
 
-    rv_op = MvNormalSVDRV()
-
-
-try:
-    import jax.random
-
-    from pytensor.link.jax.dispatch.random import jax_sample_fn
-
-    @jax_sample_fn.register(MvNormalSVDRV)
-    def jax_sample_fn_mvnormal_svd(op, node):
-        def sample_fn(rng, size, dtype, *parameters):
-            rng_key = rng["jax_state"]
-            rng_key, sampling_key = jax.random.split(rng_key, 2)
-            sample = jax.random.multivariate_normal(
-                sampling_key, *parameters, shape=size, dtype=dtype, method="svd"
-            )
-            rng["jax_state"] = rng_key
-            return (rng, sample)
-
-        return sample_fn
-
-except ImportError:
-    pass
+    # TODO: Remove this entirely on next PyMC release; method will be exposed directly in MvNormal
+    rv_op = MvNormalSVDRV(method="svd")
 
 
 class LinearGaussianStateSpaceRV(SymbolicRandomVariable):
