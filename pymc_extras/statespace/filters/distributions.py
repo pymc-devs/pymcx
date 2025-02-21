@@ -62,7 +62,7 @@ class MvNormalSVD(MvNormal):
     A JAX MvNormal robust to low-rank covariance matrices
     """
 
-    rv_op = MvNormalSVDRV()
+    rv_op = MvNormalSVDRV(method="svd")
 
 
 try:

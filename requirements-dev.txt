@@ -3,3 +3,5 @@ blackjax
 
 # Used as benchmark for statespace models
 statsmodels
+scikit-learn
+better-optimize
