@@ -10,7 +10,7 @@ dependencies:
 - xhistogram
 - statsmodels
 - numba<=0.60.0
-- pymc>=5.20
+- pymc>=5.21
 - pip:
   - blackjax
   - scikit-learn
